@@ -1,0 +1,75 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Virtual environments and local dependency installs
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+!.env.example
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Logs and runtime output
+*.log
+logs/
+run/
+tmp/
+temp/
+
+# Textual development artifacts
+.textual/
+textual.log
+screenshots/
+
+# Local configuration and secrets
+*.local
+*.local.*
+secrets.*
+
+# OS and editor metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# MATLAB generated files for validation workflows
+*.asv
+*.m~
+*.mlx~
+slprj/
+sccprj/
+codegen/
+*_ert_rtw/
+*_grt_rtw/
+*.mex*
+*.mat
+*.fig
+*.mltbx
+
+# Large ad hoc captures should stay out unless promoted to test fixtures.
+data/raw/
+captures/
+
