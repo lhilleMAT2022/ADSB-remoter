@@ -3,8 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.test-tmp/
 .mypy_cache/
 .ruff_cache/
+.pyright-cache/
 .pyre/
 .tox/
 .nox/
@@ -72,4 +74,4 @@ codegen/
 # Large ad hoc captures should stay out unless promoted to test fixtures.
 data/raw/
 captures/
-
+tests/.scratch/
