@@ -1,0 +1,69 @@
+[project]
+name = "adsb-console-respin"
+version = "0.1.0"
+description = "Textual-based ADS-B BaseStation stream parser, playback tool, tracker, and retransmitter."
+readme = "README.md"
+requires-python = ">=3.13"
+authors = [
+    { name = "Lincoln Hille" }
+]
+dependencies = [
+    "textual>=1.0.0",
+]
+
+[project.scripts]
+adsb-console = "adsb_console.app:main"
+adsb-playback = "adsb_console.playback:main"
+adsb-relay = "adsb_console.relay:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+    "pyright>=1.1.390",
+]
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/adsb_console"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "A",
+    "ASYNC",
+    "B",
+    "C4",
+    "E",
+    "F",
+    "I",
+    "N",
+    "PERF",
+    "PL",
+    "RUF",
+    "SIM",
+    "UP",
+    "W",
+]
+ignore = [
+    "PLR0913",
+]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
