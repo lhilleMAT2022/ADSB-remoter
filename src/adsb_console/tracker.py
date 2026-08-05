@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from adsb_console.models import BaseStationMessage, ObserverConfig, TrackState, utc_now
 from adsb_console.transforms import (
@@ -14,6 +14,8 @@ from adsb_console.transforms import (
     position_velocity_to_range_rate_mps,
     range_rate_to_doppler_hz,
 )
+
+DEFAULT_STALE_TRACK_SECONDS = 20.0 * 60.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,15 +34,26 @@ class ObservedTrack:
 class BaseStationTracker:
     """Stateful tracker keyed by ICAO hex address."""
 
-    def __init__(self, *, max_history: int = 100) -> None:
+    def __init__(
+        self,
+        *,
+        max_history: int = 100,
+        stale_track_seconds: float | None = DEFAULT_STALE_TRACK_SECONDS,
+    ) -> None:
         self._tracks: dict[str, TrackState] = {}
         self._max_history = max_history
+        self._stale_track_seconds = stale_track_seconds
         self.message_count = 0
         self.invalid_count = 0
+        self.purged_track_count = 0
 
     @property
     def tracks(self) -> dict[str, TrackState]:
         return self._tracks
+
+    @property
+    def stale_track_seconds(self) -> float | None:
+        return self._stale_track_seconds
 
     def update_line(self, line: str) -> TrackState | None:
         try:
@@ -68,7 +81,22 @@ class BaseStationTracker:
             self._tracks[message.icao] = track
 
         track.update(message)
+        self.purge_stale(reported_at)
         return track
+
+    def purge_stale(self, reference_time: datetime | None = None) -> int:
+        """Remove tracks with no reports inside the configured retention window."""
+
+        if self._stale_track_seconds is None or self._stale_track_seconds <= 0.0:
+            return 0
+        now = reference_time or utc_now()
+        cutoff = now - timedelta(seconds=self._stale_track_seconds)
+        stale_icaos = [icao for icao, track in self._tracks.items() if track.last_seen < cutoff]
+        for icao in stale_icaos:
+            del self._tracks[icao]
+        purged_count = len(stale_icaos)
+        self.purged_track_count += purged_count
+        return purged_count
 
     def active_tracks(self) -> list[TrackState]:
         return sorted(self._tracks.values(), key=lambda item: item.last_seen, reverse=True)

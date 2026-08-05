@@ -100,3 +100,34 @@ def test_observed_track_includes_range_rate_and_doppler() -> None:
     assert len(observed) == 1
     assert observed[0].range_rate_mps is not None
     assert observed[0].doppler_hz is not None
+
+
+def test_tracker_purges_tracks_stale_for_more_than_retention_window() -> None:
+    tracker = BaseStationTracker(stale_track_seconds=20.0 * 60.0)
+    tracker.update_line(
+        "MSG,3,1,1,OLD001,1,2025/01/01,00:00:00.000,2025/01/01,00:00:00.000,,"
+        "1000,,,42.0,-71.0,,,0,,0,0"
+    )
+
+    tracker.update_line(
+        "MSG,3,1,1,NEW001,1,2025/01/01,00:21:00.000,2025/01/01,00:21:00.000,,"
+        "1000,,,42.1,-71.1,,,0,,0,0"
+    )
+
+    assert set(tracker.tracks) == {"NEW001"}
+    assert tracker.purged_track_count == 1
+
+
+def test_tracker_can_disable_stale_track_purge() -> None:
+    tracker = BaseStationTracker(stale_track_seconds=None)
+    tracker.update_line(
+        "MSG,3,1,1,OLD001,1,2025/01/01,00:00:00.000,2025/01/01,00:00:00.000,,"
+        "1000,,,42.0,-71.0,,,0,,0,0"
+    )
+    tracker.update_line(
+        "MSG,3,1,1,NEW001,1,2025/01/01,00:21:00.000,2025/01/01,00:21:00.000,,"
+        "1000,,,42.1,-71.1,,,0,,0,0"
+    )
+
+    assert set(tracker.tracks) == {"OLD001", "NEW001"}
+    assert tracker.purged_track_count == 0

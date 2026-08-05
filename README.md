@@ -56,6 +56,7 @@ uv run --no-dev adsb-console --source 192.168.10.131:30003 --refresh-rate 0.5
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --max-display-range-km 150
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --show-aged-tracks
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --carrier-frequency-mhz 600
+uv run --no-dev adsb-console --source 192.168.10.131:30003 --track-retention-minutes 20
 ```
 
 For development on that machine, run `uv sync --group dev` and omit `--no-dev` when running tools that need the dev dependencies.
@@ -95,7 +96,7 @@ The TUI redraws the table at a bounded screen refresh rate instead of rebuilding
 - `h`: toggle aged-out tracks hidden or shown
 - `s`: cycle the active sort column
 
-Tracks with no reports for more than 20 seconds are hidden by default. The summary line reports visible and hidden track counts.
+Tracks with no reports for more than 20 seconds are hidden by default. Tracks with no reports for more than 20 minutes are purged from memory by default; use `--track-retention-minutes` to change that retention window, or set it to `0` to disable purging. The summary line reports visible, hidden, and purged track counts.
 
 Relay a BaseStation TCP stream to one or more UDP destinations:
 

@@ -16,6 +16,7 @@ def test_app_constructs_without_textual_attribute_collisions() -> None:
     assert app.event_log is None
     assert app.tracker.message_count == 0
     assert app.selected_observer.is_local
+    assert app.tracker.stale_track_seconds == 20.0 * 60.0
     assert len(app.observers) == 2
     assert app.observers[0].name == "MathWorks Apple Hill Parking Lot"
     assert app.observers[1].name == "CBS Broadcast Tower"

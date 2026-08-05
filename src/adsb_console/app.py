@@ -17,7 +17,11 @@ from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
 
 from adsb_console.config import load_observers_or_default, parse_endpoint
 from adsb_console.models import ObserverConfig, TrackState, utc_now
-from adsb_console.tracker import BaseStationTracker, ObservedTrack
+from adsb_console.tracker import (
+    DEFAULT_STALE_TRACK_SECONDS,
+    BaseStationTracker,
+    ObservedTrack,
+)
 
 DEFAULT_SCREEN_REFRESH_HZ = 0.5
 DEFAULT_MAX_DISPLAY_RANGE_KM = 200.0
@@ -25,6 +29,8 @@ DISPLAY_RANGE_STEP_KM = 25.0
 DEFAULT_MAX_FILTERED_ROWS = 200
 DEFAULT_AGE_OUT_SECONDS = 20.0
 DEFAULT_CARRIER_FREQUENCY_MHZ = 600.0
+DEFAULT_LOG_MAX_LINES = 1_000
+DEFAULT_TRACK_RETENTION_MINUTES = DEFAULT_STALE_TRACK_SECONDS / 60.0
 SORT_COLUMNS = (
     "ICAO",
     "Callsign",
@@ -100,12 +106,17 @@ class ADSBConsoleApp(App[None]):
         hide_aged_tracks: bool = True,
         age_out_seconds: float = DEFAULT_AGE_OUT_SECONDS,
         carrier_frequency_mhz: float = DEFAULT_CARRIER_FREQUENCY_MHZ,
+        track_retention_minutes: float = DEFAULT_TRACK_RETENTION_MINUTES,
     ) -> None:
         super().__init__()
         self.source = source
         self.observers = observers or load_observers_or_default(None)
         self.selected_observer_index = _selected_observer_index(self.observers, selected_observer)
-        self.tracker = BaseStationTracker()
+        self.tracker = BaseStationTracker(
+            stale_track_seconds=track_retention_minutes * 60.0
+            if track_retention_minutes > 0.0
+            else None
+        )
         self.refresh_interval_s = refresh_interval_s(refresh_rate_hz)
         self.max_display_range_km = max_display_range_km
         self.show_all_tracks = False
@@ -132,7 +143,12 @@ class ADSBConsoleApp(App[None]):
         )
         with Horizontal(id="main"):
             yield DataTable(id="tracks")
-            yield RichLog(id="log", highlight=True, markup=True)
+            yield RichLog(
+                id="log",
+                highlight=True,
+                markup=True,
+                max_lines=DEFAULT_LOG_MAX_LINES,
+            )
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -295,6 +311,7 @@ class ADSBConsoleApp(App[None]):
         return (
             f"{prefix}Messages: {self.tracker.message_count} | "
             f"Tracks: {len(self.tracker.tracks)} | "
+            f"Purged: {self.tracker.purged_track_count} | "
             f"Observer: {self.selected_observer.name} | "
             f"Visible: {filter_result.visible_count}/{filter_result.observer_track_count} | "
             f"Hidden: {filter_result.hidden_count} | "
@@ -328,6 +345,12 @@ def main() -> None:
     parser.add_argument(
         "--carrier-frequency-mhz", default=DEFAULT_CARRIER_FREQUENCY_MHZ, type=float
     )
+    parser.add_argument(
+        "--track-retention-minutes",
+        default=DEFAULT_TRACK_RETENTION_MINUTES,
+        type=float,
+        help="Purge tracks with no reports after this many minutes; <=0 disables purge.",
+    )
     args = parser.parse_args()
 
     ADSBConsoleApp(
@@ -340,6 +363,7 @@ def main() -> None:
         hide_aged_tracks=not args.show_aged_tracks,
         age_out_seconds=args.age_out_seconds,
         carrier_frequency_mhz=args.carrier_frequency_mhz,
+        track_retention_minutes=args.track_retention_minutes,
     ).run()
 
 
