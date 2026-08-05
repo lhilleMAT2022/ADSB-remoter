@@ -13,6 +13,50 @@ uv sync --group dev
 
 The runtime dependency set is intentionally small. Textual provides the TUI; BaseStation parsing, playback, TCP/UDP I/O, tracking, and coordinate transforms should remain independently testable without the TUI layer.
 
+## Ubuntu 24 Deployment
+
+The field deployment target is an Ubuntu 24 desktop that can reach the Raspberry Pi running dump1090 at `192.168.2.131`. dump1090 normally exposes SBS/BaseStation messages on TCP port `30003`, so the live source is `192.168.2.131:30003`.
+
+Install baseline tools:
+
+```bash
+sudo apt update
+sudo apt install -y git curl netcat-openbsd
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+```
+
+Clone and install the console:
+
+```bash
+git clone git@github.com:lhilleMAT2022/ADSB-remoter.git
+cd ADSB-remoter
+uv python install 3.13
+uv sync
+```
+
+Before launching the TUI, verify that the Ubuntu desktop can reach the Pi's dump1090 SBS feed:
+
+```bash
+nc -vz 192.168.2.131 30003
+```
+
+Start the live TUI:
+
+```bash
+uv run adsb-console --source 192.168.2.131:30003
+```
+
+Useful live-display options:
+
+```bash
+uv run adsb-console --source 192.168.2.131:30003 --refresh-rate 0.5
+uv run adsb-console --source 192.168.2.131:30003 --max-display-range-km 150
+uv run adsb-console --source 192.168.2.131:30003 --show-aged-tracks
+```
+
+If `nc` cannot connect, check that the desktop and Pi are on the same reachable network, that the Pi address is still `192.168.2.131`, and that dump1090 is configured to expose the SBS/BaseStation TCP output on port `30003`.
+
 ## MVP Commands
 
 Replay one or more recorded BaseStation files over TCP:
