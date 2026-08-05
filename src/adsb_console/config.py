@@ -9,11 +9,18 @@ from adsb_console.models import ObserverConfig, ObserverRole, ReportMethod
 
 Endpoint = tuple[str, int]
 DEFAULT_LOCAL_OBSERVER = ObserverConfig(
-    name="Local",
+    name="Goat Island Lighthouse",
     role=ObserverRole.LOCAL,
-    latitude_deg=41.576006,
-    longitude_deg=-71.281711,
-    altitude_m=50.0,
+    latitude_deg=41.49320492073694,
+    longitude_deg=-71.32716591601445,
+    altitude_m=5.0,
+)
+DEFAULT_REMOTE_OBSERVER = ObserverConfig(
+    name="MathWorks Apple Hill",
+    role=ObserverRole.REMOTE,
+    latitude_deg=42.299350798761694,
+    longitude_deg=-71.34948267330608,
+    altitude_m=75.0,
 )
 
 
@@ -91,13 +98,17 @@ def ensure_local_observer(observers: list[ObserverConfig]) -> list[ObserverConfi
             ),
             *observers,
         ]
-    return [DEFAULT_LOCAL_OBSERVER]
+    return default_observers()
 
 
 def load_observers_or_default(path: str | Path | None) -> list[ObserverConfig]:
     if path is None:
-        return [DEFAULT_LOCAL_OBSERVER]
+        return default_observers()
     return ensure_local_observer(load_observers(path))
+
+
+def default_observers() -> list[ObserverConfig]:
+    return [DEFAULT_LOCAL_OBSERVER, DEFAULT_REMOTE_OBSERVER]
 
 
 def _observer_role(value: str | None) -> ObserverRole:

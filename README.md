@@ -35,6 +35,8 @@ Observer configuration is loaded from an INI file. The TUI always has a local ob
 adsb-console --source 127.0.0.1:28887 --observerfile .\tests\fixtures\observers.ini
 ```
 
+Without an observer file, the default local observer is Goat Island Lighthouse in Newport, RI, and the default remote observer is MathWorks Apple Hill.
+
 Relay a BaseStation TCP stream to one or more UDP destinations:
 
 ```powershell
