@@ -13,6 +13,8 @@ uv sync --group dev
 
 The runtime dependency set is intentionally small. Textual provides the TUI; BaseStation parsing, playback, TCP/UDP I/O, tracking, and coordinate transforms should remain independently testable without the TUI layer.
 
+For a runtime-only install that skips linters and test tools, use `uv sync --no-dev` and run commands with `uv run --no-dev ...`.
+
 ## Ubuntu 24 Deployment
 
 The field deployment target is an Ubuntu 24 desktop that can reach the Raspberry Pi running dump1090 at `192.168.10.131`. dump1090 normally exposes SBS/BaseStation messages on TCP port `30003`, so the live source is `192.168.10.131:30003`.
@@ -32,7 +34,7 @@ Clone and install the console:
 git clone git@github.com:lhilleMAT2022/ADSB-remoter.git
 cd ADSB-remoter
 uv python install 3.13
-uv sync
+uv sync --no-dev
 ```
 
 Before launching the TUI, verify that the Ubuntu desktop can reach the Pi's dump1090 SBS feed:
@@ -44,16 +46,18 @@ nc -vz 192.168.10.131 30003
 Start the live TUI:
 
 ```bash
-uv run adsb-console --source 192.168.10.131:30003
+uv run --no-dev adsb-console --source 192.168.10.131:30003
 ```
 
 Useful live-display options:
 
 ```bash
-uv run adsb-console --source 192.168.10.131:30003 --refresh-rate 0.5
-uv run adsb-console --source 192.168.10.131:30003 --max-display-range-km 150
-uv run adsb-console --source 192.168.10.131:30003 --show-aged-tracks
+uv run --no-dev adsb-console --source 192.168.10.131:30003 --refresh-rate 0.5
+uv run --no-dev adsb-console --source 192.168.10.131:30003 --max-display-range-km 150
+uv run --no-dev adsb-console --source 192.168.10.131:30003 --show-aged-tracks
 ```
+
+For development on that machine, run `uv sync --group dev` and omit `--no-dev` when running tools that need the dev dependencies.
 
 If `nc` cannot connect, check that the desktop and Pi are on the same reachable network, that the Pi address is still `192.168.10.131`, and that dump1090 is configured to expose the SBS/BaseStation TCP output on port `30003`.
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import gzip
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
+import adsb_console.playback
 from adsb_console.playback import PlaybackConfig, format_peer, format_status_line, replay_messages
 
 
@@ -53,6 +55,25 @@ async def test_replay_messages_from_sbs_clean_gzip_fixture() -> None:
 
     assert len(messages) == 100
     assert {message.icao for message in messages}
+
+
+@pytest.mark.asyncio
+async def test_replay_messages_rebases_timestamps_with_utc_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixed_now = datetime(2026, 8, 5, 20, 42, 32, 123456)
+    monkeypatch.setattr(adsb_console.playback, "utc_now", lambda: fixed_now)
+    config = PlaybackConfig(
+        files=(Path("tests/fixtures/basestation_sample.csv"),),
+        max_lines=1,
+        preserve_timing=False,
+        rebase_timestamps=True,
+    )
+
+    messages = [message async for message in replay_messages(config)]
+
+    assert messages[0].fields[6] == "2026/08/05"
+    assert messages[0].fields[7] == "20:42:32.123"
 
 
 def _gzip_fixture() -> Path:

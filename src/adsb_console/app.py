@@ -16,7 +16,7 @@ from textual.containers import Horizontal
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
 
 from adsb_console.config import load_observers_or_default, parse_endpoint
-from adsb_console.models import ObserverConfig, TrackState
+from adsb_console.models import ObserverConfig, TrackState, utc_now
 from adsb_console.tracker import BaseStationTracker, ObservedTrack
 
 DEFAULT_SCREEN_REFRESH_HZ = 0.5
@@ -175,7 +175,7 @@ class ADSBConsoleApp(App[None]):
         if self.table is None:
             return DisplayFilterResult.empty()
         self.table.clear()
-        now = datetime.now()
+        now = utc_now()
         observed_tracks = self.tracker.observed_tracks([self.selected_observer])
         filter_result = filter_display_tracks(
             observed_tracks=observed_tracks,

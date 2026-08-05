@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from adsb_console.models import BaseStationMessage, ObserverConfig, TrackState
+from adsb_console.models import BaseStationMessage, ObserverConfig, TrackState, utc_now
 from adsb_console.transforms import RangeAzEl, is_observable_by, position_to_range_az_el
 
 
@@ -48,7 +48,7 @@ class BaseStationTracker:
             return None
 
         self.message_count += 1
-        reported_at = message.generated_at or datetime.now()
+        reported_at = message.generated_at or utc_now()
         track = self._tracks.get(message.icao)
         if track is None:
             track = TrackState(

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TextIO, cast
 
 from adsb_console.config import parse_endpoint
-from adsb_console.models import BaseStationMessage
+from adsb_console.models import BaseStationMessage, utc_now
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +56,7 @@ async def replay_messages(config: PlaybackConfig) -> AsyncIterator[BaseStationMe
 
         emitted += 1
         if config.rebase_timestamps:
-            message = message.with_rebased_timestamps(datetime.now())
+            message = message.with_rebased_timestamps(utc_now())
         yield message
 
         if config.max_lines is not None and emitted >= config.max_lines:

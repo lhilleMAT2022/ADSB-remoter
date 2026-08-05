@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import IntEnum, StrEnum
 from typing import Self
 
 BASESTATION_FIELD_COUNT = 22
 MILLISECONDS = 3
 FEET_TO_METERS = 0.3048
+
+
+def utc_now() -> datetime:
+    """Return UTC time as a naive datetime matching SBS/BaseStation timestamp fields."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class TransmissionType(IntEnum):
@@ -245,7 +250,7 @@ class TrackState:
     max_history: int = 100
 
     def update(self, message: BaseStationMessage) -> None:
-        reported_at = message.generated_at or datetime.now()
+        reported_at = message.generated_at or utc_now()
         self.last_seen = reported_at
         self.message_count += 1
 
