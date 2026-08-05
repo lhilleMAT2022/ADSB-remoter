@@ -48,7 +48,7 @@ class ADSBConsoleApp(App[None]):
         self.tracker = BaseStationTracker()
         self.table: DataTable[str] | None = None
         self.summary: Static | None = None
-        self.log: RichLog | None = None
+        self.event_log: RichLog | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -61,7 +61,7 @@ class ADSBConsoleApp(App[None]):
     async def on_mount(self) -> None:
         self.table = self.query_one("#tracks", DataTable)
         self.summary = self.query_one("#summary", Static)
-        self.log = self.query_one("#log", RichLog)
+        self.event_log = self.query_one("#log", RichLog)
         self.table.add_columns("ICAO", "Callsign", "Msgs", "Alt ft", "Lat", "Lon", "GS kt", "Age s")
         self.run_worker(self._monitor_source(), name="source-monitor", exclusive=True)
 
@@ -103,8 +103,8 @@ class ADSBConsoleApp(App[None]):
             self.table.add_row(*_track_row(track, now))
 
     def _write_log(self, message: str) -> None:
-        if self.log is not None:
-            self.log.write(message)
+        if self.event_log is not None:
+            self.event_log.write(message)
 
     def _update_summary(self, message: str) -> None:
         if self.summary is not None:
