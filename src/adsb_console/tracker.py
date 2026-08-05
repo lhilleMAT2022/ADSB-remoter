@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from adsb_console.models import BaseStationMessage, ObserverConfig, TrackState
-from adsb_console.transforms import RangeAzEl, is_in_observer_range, position_to_range_az_el
+from adsb_console.transforms import RangeAzEl, is_observable_by, position_to_range_az_el
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,10 +70,12 @@ class BaseStationTracker:
         for observer in observers:
             seeker = re.compile(observer.seek_pattern)
             for track in self._tracks.values():
-                if track.last_position is None or seeker.fullmatch(track.icao) is None:
+                if track.last_position is None:
+                    continue
+                if not observer.is_local and seeker.fullmatch(track.icao) is None:
                     continue
                 range_az_el = position_to_range_az_el(track.last_position, observer)
-                if not is_in_observer_range(range_az_el, observer):
+                if not is_observable_by(track.last_position, range_az_el, observer):
                     continue
                 observed.append(
                     ObservedTrack(

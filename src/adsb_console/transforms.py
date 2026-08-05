@@ -10,6 +10,7 @@ from adsb_console.models import ObserverConfig, PositionReport
 WGS84_A_M = 6_378_137.0
 WGS84_F = 1.0 / 298.257_223_563
 WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
+MEAN_EARTH_RADIUS_M = 6_371_000.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +98,44 @@ def position_to_range_az_el(position: PositionReport, observer: ObserverConfig) 
     return enu_to_range_az_el(enu)
 
 
-def is_in_observer_range(range_az_el: RangeAzEl, observer: ObserverConfig) -> bool:
-    """Return true when the projected target is within observer range gates."""
+def is_observable_by(
+    position: PositionReport, range_az_el: RangeAzEl, observer: ObserverConfig
+) -> bool:
+    """Return true when a target satisfies observer range, angular, and horizon gates."""
 
-    return observer.min_range_m <= range_az_el.range_m <= observer.max_range_m
+    if observer.is_local:
+        return True
+    in_range = observer.min_range_m <= range_az_el.range_m <= observer.max_range_m
+    in_azimuth = _angle_in_extent(
+        range_az_el.azimuth_deg, observer.min_azimuth_deg, observer.max_azimuth_deg
+    )
+    in_elevation = (
+        observer.min_elevation_deg <= range_az_el.elevation_deg <= observer.max_elevation_deg
+    )
+    horizon_visible = (
+        range_az_el.elevation_deg < 0.0
+        and range_az_el.elevation_deg < observer.min_elevation_deg
+        and range_az_el.range_m <= horizon_distance_m(position.altitude_m, observer.altitude_m)
+    )
+    return in_range and in_azimuth and (in_elevation or horizon_visible)
+
+
+def horizon_distance_m(target_altitude_m: float, observer_altitude_m: float = 0.0) -> float:
+    """Approximate geometric line-of-sight horizon distance."""
+
+    target_altitude_m = max(target_altitude_m, 0.0)
+    observer_altitude_m = max(observer_altitude_m, 0.0)
+    return sqrt(2.0 * MEAN_EARTH_RADIUS_M * target_altitude_m) + sqrt(
+        2.0 * MEAN_EARTH_RADIUS_M * observer_altitude_m
+    )
+
+
+def _angle_in_extent(angle_deg: float, min_deg: float, max_deg: float) -> bool:
+    angle = angle_deg % 360.0
+    lower = min_deg % 360.0
+    upper = max_deg % 360.0
+    if abs(max_deg - min_deg) >= 360.0:
+        return True
+    if lower <= upper:
+        return lower <= angle <= upper
+    return angle >= lower or angle <= upper

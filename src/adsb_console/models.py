@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from typing import Self
 
 BASESTATION_FIELD_COUNT = 22
@@ -24,6 +24,21 @@ class TransmissionType(IntEnum):
     SURVEILLANCE_ID = 6
     AIR_TO_AIR = 7
     ALL_CALL_REPLY = 8
+
+
+class ObserverRole(StrEnum):
+    """Observer role in the ADS-B console."""
+
+    LOCAL = "local"
+    REMOTE = "remote"
+
+
+class ReportMethod(StrEnum):
+    """How reports are sent to an observer."""
+
+    NONE = "none"
+    UDP = "udp"
+    TCP = "tcp"
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +197,7 @@ class ObserverConfig:
     """Observer/sensor configuration for projecting ADS-B tracks."""
 
     name: str
+    role: ObserverRole
     latitude_deg: float
     longitude_deg: float
     altitude_m: float
@@ -190,7 +206,18 @@ class ObserverConfig:
     orientation_roll_deg: float = 0.0
     min_range_m: float = 0.0
     max_range_m: float = 1_000_000.0
+    min_azimuth_deg: float = 0.0
+    max_azimuth_deg: float = 360.0
+    min_elevation_deg: float = -90.0
+    max_elevation_deg: float = 90.0
     seek_pattern: str = ".*"
+    report_rate_hz: float = 0.5
+    report_method: ReportMethod = ReportMethod.NONE
+    report_endpoint: str | None = None
+
+    @property
+    def is_local(self) -> bool:
+        return self.role is ObserverRole.LOCAL
 
 
 def _new_subtype_counts() -> dict[int, int]:

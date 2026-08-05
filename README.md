@@ -21,10 +21,18 @@ Replay one or more recorded BaseStation files over TCP:
 adsb-playback ..\000_sbs_for_ELAD_cleanup\sbs_clean\10_adsb_20220413_060850.csv --bind 127.0.0.1:28887
 ```
 
+The playback server logs client connections, clean disconnects, and periodic sent-message summaries. Use `--status-interval 5` to change the status cadence.
+
 Monitor a live or playback BaseStation TCP stream in the Textual TUI:
 
 ```powershell
 adsb-console --source 127.0.0.1:28887
+```
+
+Observer configuration is loaded from an INI file. The TUI always has a local observer and displays range, azimuth, and elevation from the selected observer. Press `o` to cycle observers.
+
+```powershell
+adsb-console --source 127.0.0.1:28887 --observerfile .\tests\fixtures\observers.ini
 ```
 
 Relay a BaseStation TCP stream to one or more UDP destinations:

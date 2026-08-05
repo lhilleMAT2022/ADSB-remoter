@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from adsb_console.models import ObserverConfig, ObserverRole
 from adsb_console.tracker import BaseStationTracker
 
 
@@ -29,3 +30,26 @@ def test_tracker_rejects_non_msg_lines() -> None:
     assert tracker.update_line("STA,,,,") is None
     assert tracker.message_count == 0
     assert tracker.invalid_count == 1
+
+
+def test_local_observer_projects_all_positioned_tracks_without_remote_gates() -> None:
+    tracker = BaseStationTracker()
+    tracker.update_line(
+        "MSG,3,1,1,A5CDE9,1,2025/08/12,12:20:30.797,2025/08/12,12:20:30.827,,"
+        "5200,,,42.33270,-71.35499,,,0,,0,0"
+    )
+    observer = ObserverConfig(
+        name="local",
+        role=ObserverRole.LOCAL,
+        latitude_deg=42.0,
+        longitude_deg=-71.0,
+        altitude_m=0.0,
+        seek_pattern="NO_MATCH",
+        min_range_m=1_000_000.0,
+        max_range_m=1_000_001.0,
+    )
+
+    observed = tracker.observed_tracks([observer])
+
+    assert len(observed) == 1
+    assert observed[0].icao == "A5CDE9"

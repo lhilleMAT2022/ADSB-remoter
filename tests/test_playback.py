@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from adsb_console.playback import PlaybackConfig, replay_messages
+from adsb_console.playback import PlaybackConfig, format_peer, format_status_line, replay_messages
 
 
 @pytest.mark.asyncio
@@ -45,3 +45,8 @@ def _gzip_fixture() -> Path:
     compressed = scratch / "basestation_sample.csv.gz"
     compressed.write_bytes(gzip.compress(source.read_bytes()))
     return compressed
+
+
+def test_status_helpers() -> None:
+    assert format_peer(("127.0.0.1", 12345)) == "127.0.0.1:12345"
+    assert "2 unique tracks sent, 3 total messages" in format_status_line({"A", "B"}, 3)
