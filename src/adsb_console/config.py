@@ -9,18 +9,18 @@ from adsb_console.models import ObserverConfig, ObserverRole, ReportMethod
 
 Endpoint = tuple[str, int]
 DEFAULT_LOCAL_OBSERVER = ObserverConfig(
-    name="Goat Island Lighthouse",
+    name="MathWorks Apple Hill Parking Lot",
     role=ObserverRole.LOCAL,
-    latitude_deg=41.49320492073694,
-    longitude_deg=-71.32716591601445,
-    altitude_m=5.0,
-)
-DEFAULT_REMOTE_OBSERVER = ObserverConfig(
-    name="MathWorks Apple Hill",
-    role=ObserverRole.REMOTE,
     latitude_deg=42.299350798761694,
     longitude_deg=-71.34948267330608,
     altitude_m=75.0,
+)
+DEFAULT_REMOTE_OBSERVER = ObserverConfig(
+    name="CBS Broadcast Tower",
+    role=ObserverRole.REMOTE,
+    latitude_deg=42.308259720042415,
+    longitude_deg=-71.21565924108836,
+    altitude_m=350.0,
 )
 
 

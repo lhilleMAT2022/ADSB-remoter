@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from adsb_console.models import BaseStationMessage, ObserverConfig, TrackState, utc_now
-from adsb_console.transforms import RangeAzEl, is_observable_by, position_to_range_az_el
+from adsb_console.transforms import (
+    RangeAzEl,
+    is_observable_by,
+    position_to_range_az_el,
+    position_velocity_to_range_rate_mps,
+    range_rate_to_doppler_hz,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +24,8 @@ class ObservedTrack:
     icao: str
     callsign: str | None
     range_az_el: RangeAzEl
+    range_rate_mps: float | None
+    doppler_hz: float | None
     reported_at: datetime
 
 
@@ -65,7 +73,9 @@ class BaseStationTracker:
     def active_tracks(self) -> list[TrackState]:
         return sorted(self._tracks.values(), key=lambda item: item.last_seen, reverse=True)
 
-    def observed_tracks(self, observers: list[ObserverConfig]) -> list[ObservedTrack]:
+    def observed_tracks(
+        self, observers: list[ObserverConfig], *, carrier_frequency_hz: float
+    ) -> list[ObservedTrack]:
         observed: list[ObservedTrack] = []
         for observer in observers:
             seeker = re.compile(observer.seek_pattern)
@@ -81,12 +91,23 @@ class BaseStationTracker:
                     and not is_observable_by(track.last_position, range_az_el, observer)
                 ):
                     continue
+                range_rate_mps = (
+                    None
+                    if track.last_velocity is None
+                    else position_velocity_to_range_rate_mps(
+                        track.last_position, track.last_velocity, observer
+                    )
+                )
                 observed.append(
                     ObservedTrack(
                         observer_name=observer.name,
                         icao=track.icao,
                         callsign=track.callsign,
                         range_az_el=range_az_el,
+                        range_rate_mps=range_rate_mps,
+                        doppler_hz=None
+                        if range_rate_mps is None
+                        else range_rate_to_doppler_hz(range_rate_mps, carrier_frequency_hz),
                         reported_at=track.last_position.reported_at,
                     )
                 )

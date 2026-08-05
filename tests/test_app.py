@@ -17,8 +17,8 @@ def test_app_constructs_without_textual_attribute_collisions() -> None:
     assert app.tracker.message_count == 0
     assert app.selected_observer.is_local
     assert len(app.observers) == 2
-    assert app.observers[0].name == "Goat Island Lighthouse"
-    assert app.observers[1].name == "MathWorks Apple Hill"
+    assert app.observers[0].name == "MathWorks Apple Hill Parking Lot"
+    assert app.observers[1].name == "CBS Broadcast Tower"
 
 
 def test_filter_display_tracks_counts_hidden_by_range_regex_and_row_limit() -> None:
@@ -151,6 +151,8 @@ def _observed_track(icao: str, range_m: float) -> ObservedTrack:
         icao=icao,
         callsign=None,
         range_az_el=RangeAzEl(range_m=range_m, azimuth_deg=0.0, elevation_deg=0.0),
+        range_rate_mps=None,
+        doppler_hz=None,
         reported_at=datetime.now(),
     )
 

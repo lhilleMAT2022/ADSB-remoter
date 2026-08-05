@@ -49,7 +49,7 @@ def test_local_observer_projects_all_positioned_tracks_without_remote_gates() ->
         max_range_m=1_000_001.0,
     )
 
-    observed = tracker.observed_tracks([observer])
+    observed = tracker.observed_tracks([observer], carrier_frequency_hz=600e6)
 
     assert len(observed) == 1
     assert observed[0].icao == "A5CDE9"
@@ -72,7 +72,31 @@ def test_remote_observer_specific_icao_regex_can_include_track_outside_geometry(
         max_range_m=1_000_001.0,
     )
 
-    observed = tracker.observed_tracks([observer])
+    observed = tracker.observed_tracks([observer], carrier_frequency_hz=600e6)
 
     assert len(observed) == 1
     assert observed[0].icao == "A5CDE9"
+
+
+def test_observed_track_includes_range_rate_and_doppler() -> None:
+    tracker = BaseStationTracker()
+    tracker.update_line(
+        "MSG,3,1,1,A5CDE9,1,2025/08/12,12:20:30.797,2025/08/12,12:20:30.827,,"
+        "5200,,,42.33270,-71.35499,,,0,,0,0"
+    )
+    tracker.update_line(
+        "MSG,4,1,1,A5CDE9,1,2025/08/12,12:20:30.797,2025/08/12,12:20:30.827,,,92,206,,,-384,,,,,0"
+    )
+    observer = ObserverConfig(
+        name="local",
+        role=ObserverRole.LOCAL,
+        latitude_deg=42.0,
+        longitude_deg=-71.0,
+        altitude_m=0.0,
+    )
+
+    observed = tracker.observed_tracks([observer], carrier_frequency_hz=600e6)
+
+    assert len(observed) == 1
+    assert observed[0].range_rate_mps is not None
+    assert observed[0].doppler_hz is not None

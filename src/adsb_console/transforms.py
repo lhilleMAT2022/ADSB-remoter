@@ -5,12 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import atan2, cos, degrees, hypot, radians, sin, sqrt
 
-from adsb_console.models import ObserverConfig, PositionReport
+from adsb_console.models import ObserverConfig, PositionReport, VelocityReport
 
 WGS84_A_M = 6_378_137.0
 WGS84_F = 1.0 / 298.257_223_563
 WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
 MEAN_EARTH_RADIUS_M = 6_371_000.0
+KNOT_TO_METERS_PER_SECOND = 0.514444
+FEET_PER_MINUTE_TO_METERS_PER_SECOND = 0.00508
+SPEED_OF_LIGHT_MPS = 299_792_458.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,12 +26,30 @@ class EcefPoint:
 
 
 @dataclass(frozen=True, slots=True)
+class EcefVector:
+    """Earth-centered, Earth-fixed Cartesian vector."""
+
+    x: float
+    y: float
+    z: float
+
+
+@dataclass(frozen=True, slots=True)
 class EnuPoint:
     """Local east-north-up point in meters."""
 
     east_m: float
     north_m: float
     up_m: float
+
+
+@dataclass(frozen=True, slots=True)
+class EnuVector:
+    """Local east-north-up velocity vector in meters per second."""
+
+    east_mps: float
+    north_mps: float
+    up_mps: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +99,44 @@ def ecef_to_enu(target: EcefPoint, observer: ObserverConfig) -> EnuPoint:
     )
 
 
+def ecef_vector_to_enu(vector: EcefVector, observer: ObserverConfig) -> EnuVector:
+    """Project an ECEF vector into an observer-centered ENU frame."""
+
+    lat = radians(observer.latitude_deg)
+    lon = radians(observer.longitude_deg)
+    sin_lat = sin(lat)
+    cos_lat = cos(lat)
+    sin_lon = sin(lon)
+    cos_lon = cos(lon)
+
+    return EnuVector(
+        east_mps=-sin_lon * vector.x + cos_lon * vector.y,
+        north_mps=-sin_lat * cos_lon * vector.x - sin_lat * sin_lon * vector.y + cos_lat * vector.z,
+        up_mps=cos_lat * cos_lon * vector.x + cos_lat * sin_lon * vector.y + sin_lat * vector.z,
+    )
+
+
+def enu_vector_to_ecef(vector: EnuVector, latitude_deg: float, longitude_deg: float) -> EcefVector:
+    """Project a local ENU vector into ECEF coordinates."""
+
+    lat = radians(latitude_deg)
+    lon = radians(longitude_deg)
+    sin_lat = sin(lat)
+    cos_lat = cos(lat)
+    sin_lon = sin(lon)
+    cos_lon = cos(lon)
+
+    return EcefVector(
+        x=-sin_lon * vector.east_mps
+        - sin_lat * cos_lon * vector.north_mps
+        + cos_lat * cos_lon * vector.up_mps,
+        y=cos_lon * vector.east_mps
+        - sin_lat * sin_lon * vector.north_mps
+        + cos_lat * sin_lon * vector.up_mps,
+        z=cos_lat * vector.north_mps + sin_lat * vector.up_mps,
+    )
+
+
 def enu_to_range_az_el(point: EnuPoint) -> RangeAzEl:
     """Convert ENU coordinates to range, azimuth clockwise from north, and elevation."""
 
@@ -96,6 +155,56 @@ def position_to_range_az_el(position: PositionReport, observer: ObserverConfig) 
     ecef = lla_to_ecef(position.latitude_deg, position.longitude_deg, position.altitude_m)
     enu = ecef_to_enu(ecef, observer)
     return enu_to_range_az_el(enu)
+
+
+def position_to_enu(position: PositionReport, observer: ObserverConfig) -> EnuPoint:
+    """Project an aircraft position report into observer-centered ENU coordinates."""
+
+    ecef = lla_to_ecef(position.latitude_deg, position.longitude_deg, position.altitude_m)
+    return ecef_to_enu(ecef, observer)
+
+
+def velocity_to_observer_enu(
+    position: PositionReport, velocity: VelocityReport, observer: ObserverConfig
+) -> EnuVector:
+    """Project an aircraft velocity report into the observer ENU frame."""
+
+    track_rad = radians(velocity.track_deg)
+    ground_speed_mps = velocity.ground_speed_kt * KNOT_TO_METERS_PER_SECOND
+    target_velocity = EnuVector(
+        east_mps=ground_speed_mps * sin(track_rad),
+        north_mps=ground_speed_mps * cos(track_rad),
+        up_mps=0.0
+        if velocity.vertical_rate_fpm is None
+        else velocity.vertical_rate_fpm * FEET_PER_MINUTE_TO_METERS_PER_SECOND,
+    )
+    ecef_velocity = enu_vector_to_ecef(
+        target_velocity, position.latitude_deg, position.longitude_deg
+    )
+    return ecef_vector_to_enu(ecef_velocity, observer)
+
+
+def position_velocity_to_range_rate_mps(
+    position: PositionReport, velocity: VelocityReport, observer: ObserverConfig
+) -> float:
+    """Return line-of-sight range rate; positive is opening, negative is closing."""
+
+    target_enu = position_to_enu(position, observer)
+    velocity_enu = velocity_to_observer_enu(position, velocity, observer)
+    range_m = hypot(hypot(target_enu.east_m, target_enu.north_m), target_enu.up_m)
+    if range_m == 0.0:
+        return 0.0
+    return (
+        target_enu.east_m * velocity_enu.east_mps
+        + target_enu.north_m * velocity_enu.north_mps
+        + target_enu.up_m * velocity_enu.up_mps
+    ) / range_m
+
+
+def range_rate_to_doppler_hz(range_rate_mps: float, carrier_frequency_hz: float) -> float:
+    """Return one-way Doppler shift; closing targets have positive Doppler."""
+
+    return -range_rate_mps / SPEED_OF_LIGHT_MPS * carrier_frequency_hz
 
 
 def is_observable_by(

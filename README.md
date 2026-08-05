@@ -55,6 +55,7 @@ Useful live-display options:
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --refresh-rate 0.5
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --max-display-range-km 150
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --show-aged-tracks
+uv run --no-dev adsb-console --source 192.168.10.131:30003 --carrier-frequency-mhz 600
 ```
 
 For development on that machine, run `uv sync --group dev` and omit `--no-dev` when running tools that need the dev dependencies.
@@ -83,9 +84,9 @@ Observer configuration is loaded from an INI file. The TUI always has a local ob
 adsb-console --source 127.0.0.1:28887 --observerfile .\tests\fixtures\observers.ini
 ```
 
-Without an observer file, the default local observer is Goat Island Lighthouse in Newport, RI, and the default remote observer is MathWorks Apple Hill.
+Without an observer file, the default local observer is the MathWorks Apple Hill parking lot, and the default remote observer is the CBS Broadcast Tower.
 
-The TUI redraws the table at a bounded screen refresh rate instead of rebuilding it for every incoming SBS message. Use `--refresh-rate 0.5` or similar to tune the display cadence. Display controls:
+The TUI redraws the table at a bounded screen refresh rate instead of rebuilding it for every incoming SBS message. Use `--refresh-rate 0.5` or similar to tune the display cadence. The display includes line-of-sight range rate in meters per second and one-way Doppler shift in Hz. Doppler uses `--carrier-frequency-mhz`, which defaults to 600 MHz. Display controls:
 
 - `o`: cycle observers
 - `a`: toggle all tracks versus filtered display

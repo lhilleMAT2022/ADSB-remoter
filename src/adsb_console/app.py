@@ -24,6 +24,7 @@ DEFAULT_MAX_DISPLAY_RANGE_KM = 200.0
 DISPLAY_RANGE_STEP_KM = 25.0
 DEFAULT_MAX_FILTERED_ROWS = 200
 DEFAULT_AGE_OUT_SECONDS = 20.0
+DEFAULT_CARRIER_FREQUENCY_MHZ = 600.0
 SORT_COLUMNS = (
     "ICAO",
     "Callsign",
@@ -32,6 +33,8 @@ SORT_COLUMNS = (
     "Rng km",
     "Az deg",
     "El deg",
+    "RR m/s",
+    "Dop Hz",
     "GS kt",
     "Age s",
 )
@@ -43,6 +46,8 @@ SORT_DIRECTIONS: Mapping[str, bool] = {
     "Rng km": False,
     "Az deg": False,
     "El deg": True,
+    "RR m/s": False,
+    "Dop Hz": False,
     "GS kt": True,
     "Age s": False,
 }
@@ -94,6 +99,7 @@ class ADSBConsoleApp(App[None]):
         icao_filter: str = "",
         hide_aged_tracks: bool = True,
         age_out_seconds: float = DEFAULT_AGE_OUT_SECONDS,
+        carrier_frequency_mhz: float = DEFAULT_CARRIER_FREQUENCY_MHZ,
     ) -> None:
         super().__init__()
         self.source = source
@@ -105,6 +111,7 @@ class ADSBConsoleApp(App[None]):
         self.show_all_tracks = False
         self.hide_aged_tracks = hide_aged_tracks
         self.age_out_seconds = age_out_seconds
+        self.carrier_frequency_hz = carrier_frequency_mhz * 1_000_000.0
         self.icao_filter_text = icao_filter
         self.icao_filter = _compile_icao_filter(icao_filter)
         self.sort_column_index = SORT_COLUMNS.index(DEFAULT_SORT_COLUMN)
@@ -134,7 +141,17 @@ class ADSBConsoleApp(App[None]):
         self.filter_input = self.query_one("#filter", Input)
         self.event_log = self.query_one("#log", RichLog)
         self.table.add_columns(
-            "ICAO", "Callsign", "Msgs", "Alt ft", "Rng km", "Az deg", "El deg", "GS kt", "Age s"
+            "ICAO",
+            "Callsign",
+            "Msgs",
+            "Alt ft",
+            "Rng km",
+            "Az deg",
+            "El deg",
+            "RR m/s",
+            "Dop Hz",
+            "GS kt",
+            "Age s",
         )
         self._write_log(f"Loaded {len(self.observers)} observer(s)")
         self.run_worker(self._monitor_source(), name="source-monitor", exclusive=True)
@@ -176,7 +193,10 @@ class ADSBConsoleApp(App[None]):
             return DisplayFilterResult.empty()
         self.table.clear()
         now = utc_now()
-        observed_tracks = self.tracker.observed_tracks([self.selected_observer])
+        observed_tracks = self.tracker.observed_tracks(
+            [self.selected_observer],
+            carrier_frequency_hz=self.carrier_frequency_hz,
+        )
         filter_result = filter_display_tracks(
             observed_tracks=observed_tracks,
             icao_filter=self.icao_filter,
@@ -305,6 +325,9 @@ def main() -> None:
     parser.add_argument("--icao-filter", default="")
     parser.add_argument("--show-aged-tracks", action="store_true")
     parser.add_argument("--age-out-seconds", default=DEFAULT_AGE_OUT_SECONDS, type=float)
+    parser.add_argument(
+        "--carrier-frequency-mhz", default=DEFAULT_CARRIER_FREQUENCY_MHZ, type=float
+    )
     args = parser.parse_args()
 
     ADSBConsoleApp(
@@ -316,12 +339,13 @@ def main() -> None:
         icao_filter=args.icao_filter,
         hide_aged_tracks=not args.show_aged_tracks,
         age_out_seconds=args.age_out_seconds,
+        carrier_frequency_mhz=args.carrier_frequency_mhz,
     ).run()
 
 
 def _track_row(
     observed_track: ObservedTrack, track: TrackState, now: datetime
-) -> tuple[str, str, str, str, str, str, str, str, str]:
+) -> tuple[str, str, str, str, str, str, str, str, str, str, str]:
     position = track.last_position
     velocity = track.last_velocity
     age_s = (now - track.last_seen).total_seconds()
@@ -334,6 +358,8 @@ def _track_row(
         f"{range_az_el.range_m / 1000.0:.1f}",
         f"{range_az_el.azimuth_deg:.1f}",
         f"{range_az_el.elevation_deg:.1f}",
+        "" if observed_track.range_rate_mps is None else f"{observed_track.range_rate_mps:.1f}",
+        "" if observed_track.doppler_hz is None else f"{observed_track.doppler_hz:.1f}",
         "" if velocity is None else f"{velocity.ground_speed_kt:.0f}",
         f"{age_s:.1f}",
     )
@@ -456,6 +482,10 @@ def sort_display_tracks(
         sorted_tracks = sorted(
             observed_tracks, key=lambda item: item.range_az_el.elevation_deg, reverse=reverse
         )
+    elif sort_column == "RR m/s":
+        sorted_tracks = sorted(observed_tracks, key=_observed_track_range_rate_mps, reverse=reverse)
+    elif sort_column == "Dop Hz":
+        sorted_tracks = sorted(observed_tracks, key=_observed_track_doppler_hz, reverse=reverse)
     elif sort_column == "GS kt":
         sorted_tracks = sorted(
             observed_tracks,
@@ -501,6 +531,18 @@ def _track_ground_speed_kt(
     if track is None or track.last_velocity is None:
         return float("-inf")
     return track.last_velocity.ground_speed_kt
+
+
+def _observed_track_range_rate_mps(observed_track: ObservedTrack) -> float:
+    if observed_track.range_rate_mps is None:
+        return float("inf")
+    return observed_track.range_rate_mps
+
+
+def _observed_track_doppler_hz(observed_track: ObservedTrack) -> float:
+    if observed_track.doppler_hz is None:
+        return float("inf")
+    return observed_track.doppler_hz
 
 
 def _track_age_s(
