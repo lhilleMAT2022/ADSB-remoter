@@ -94,7 +94,11 @@ The TUI redraws the table at a bounded screen refresh rate instead of rebuilding
 - `+` / `-`: increase or decrease the maximum display range
 - `f`: focus the ICAO regex filter; press Enter to apply
 - `h`: toggle aged-out tracks hidden or shown
+- `Enter`: focus the selected track
+- `Esc`: return from track focus to observer focus
 - `s`: cycle the active sort column
+
+In track focus, the top detail area shows the selected track's ICAO, callsign, message count, last LLA, ground speed, and age. The table below shows every observer's range, range rate, azimuth, Doppler, CPA range, CPA bearing, and time to CPA for that selected track. If the focused track ages out or is purged, the screen keeps the last values and marks the track as aged-out or dropped.
 
 Tracks with no reports for more than 20 seconds are hidden by default. Tracks with no reports for more than 20 minutes are purged from memory by default; use `--track-retention-minutes` to change that retention window, or set it to `0` to disable purging. The summary line reports visible, hidden, and purged track counts.
 

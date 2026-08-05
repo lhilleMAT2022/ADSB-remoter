@@ -3,10 +3,17 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
-from adsb_console.app import ADSBConsoleApp, filter_display_tracks, refresh_interval_s
+from adsb_console.app import (
+    ADSBConsoleApp,
+    TrackFocusSnapshot,
+    filter_display_tracks,
+    refresh_interval_s,
+    track_focus_row,
+    track_focus_status,
+)
 from adsb_console.models import TrackState
 from adsb_console.tracker import ObservedTrack
-from adsb_console.transforms import RangeAzEl
+from adsb_console.transforms import ClosestPointOfApproach, RangeAzEl
 
 
 def test_app_constructs_without_textual_attribute_collisions() -> None:
@@ -146,6 +153,53 @@ def test_filter_display_tracks_can_show_aged_tracks() -> None:
     assert result.hidden_count == 0
 
 
+def test_track_focus_status_reports_aged_and_dropped() -> None:
+    now = datetime.now()
+    track = _track_state("FOCUS", now - timedelta(seconds=30), message_count=1)
+
+    aged = TrackFocusSnapshot(
+        icao="FOCUS",
+        track=track,
+        observed_tracks=[],
+        captured_at=now,
+        dropped=False,
+    )
+    dropped = TrackFocusSnapshot(
+        icao="FOCUS",
+        track=track,
+        observed_tracks=[],
+        captured_at=now,
+        dropped=True,
+    )
+
+    assert track_focus_status(aged, now, age_out_seconds=20.0) == "aged-out"
+    assert track_focus_status(dropped, now, age_out_seconds=20.0) == "dropped"
+
+
+def test_track_focus_row_formats_cpa_values() -> None:
+    observed_track = ObservedTrack(
+        observer_name="LongObserverName",
+        icao="FOCUS",
+        callsign=None,
+        range_az_el=RangeAzEl(range_m=12_345.0, azimuth_deg=123.4, elevation_deg=5.0),
+        range_rate_mps=-10.5,
+        doppler_hz=21.0,
+        cpa=ClosestPointOfApproach(range_m=2_000.0, bearing_deg=90.0, time_s=-5.0),
+        reported_at=datetime.now(),
+    )
+
+    assert track_focus_row(observed_track) == (
+        "LongObserv",
+        "12.3",
+        "-10.5",
+        "123.4",
+        "21.0",
+        "2.0",
+        "90.0",
+        "-5.0",
+    )
+
+
 def _observed_track(icao: str, range_m: float) -> ObservedTrack:
     return ObservedTrack(
         observer_name="observer",
@@ -154,6 +208,7 @@ def _observed_track(icao: str, range_m: float) -> ObservedTrack:
         range_az_el=RangeAzEl(range_m=range_m, azimuth_deg=0.0, elevation_deg=0.0),
         range_rate_mps=None,
         doppler_hz=None,
+        cpa=None,
         reported_at=datetime.now(),
     )
 

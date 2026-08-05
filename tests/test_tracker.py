@@ -100,6 +100,7 @@ def test_observed_track_includes_range_rate_and_doppler() -> None:
     assert len(observed) == 1
     assert observed[0].range_rate_mps is not None
     assert observed[0].doppler_hz is not None
+    assert observed[0].cpa is not None
 
 
 def test_tracker_purges_tracks_stale_for_more_than_retention_window() -> None:

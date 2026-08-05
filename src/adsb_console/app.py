@@ -8,11 +8,12 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from pathlib import Path
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
 
 from adsb_console.config import load_observers_or_default, parse_endpoint
@@ -31,6 +32,8 @@ DEFAULT_AGE_OUT_SECONDS = 20.0
 DEFAULT_CARRIER_FREQUENCY_MHZ = 600.0
 DEFAULT_LOG_MAX_LINES = 1_000
 DEFAULT_TRACK_RETENTION_MINUTES = DEFAULT_STALE_TRACK_SECONDS / 60.0
+OBSERVER_TABLE = "observer"
+TRACK_FOCUS_TABLE = "track-focus"
 SORT_COLUMNS = (
     "ICAO",
     "Callsign",
@@ -43,6 +46,16 @@ SORT_COLUMNS = (
     "Dop Hz",
     "GS kt",
     "Age s",
+)
+TRACK_FOCUS_COLUMNS = (
+    "Observer",
+    "Range km",
+    "RR m/s",
+    "Az deg",
+    "Dop Hz",
+    "CPA km",
+    "CPA Brg",
+    "CPA s",
 )
 SORT_DIRECTIONS: Mapping[str, bool] = {
     "ICAO": False,
@@ -69,12 +82,21 @@ class ADSBConsoleApp(App[None]):
         padding: 0 1;
     }
 
+    #track-detail {
+        height: 3;
+        padding: 0 1;
+    }
+
     #main {
         height: 1fr;
     }
 
-    #tracks {
+    #left {
         width: 2fr;
+    }
+
+    #tracks {
+        height: 1fr;
     }
 
     #log {
@@ -89,9 +111,11 @@ class ADSBConsoleApp(App[None]):
         ("-", "decrease_range", "Less range"),
         ("f", "focus_filter", "Filter ICAO"),
         ("h", "toggle_aged_tracks", "Hide aged"),
+        ("enter", "focus_selected_track", "Track focus"),
         ("o", "next_observer", "Next observer"),
         ("q", "quit", "Quit"),
         ("s", "next_sort_column", "Sort column"),
+        ("escape", "observer_focus", "Observer focus"),
     ]
 
     def __init__(
@@ -128,21 +152,28 @@ class ADSBConsoleApp(App[None]):
         self.sort_column_index = SORT_COLUMNS.index(DEFAULT_SORT_COLUMN)
         self.last_track_icao = ""
         self.last_filter_result = DisplayFilterResult.empty()
+        self.screen_focus = OBSERVER_TABLE
+        self.selected_track_icao: str | None = None
+        self.track_focus_snapshot: TrackFocusSnapshot | None = None
+        self.table_layout: str | None = None
         self.table: DataTable[str] | None = None
         self.summary: Static | None = None
         self.filter_input: Input | None = None
+        self.track_detail: Static | None = None
         self.event_log: RichLog | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static("Disconnected", id="summary")
-        yield Input(
-            value=self.icao_filter_text,
-            placeholder="ICAO regex filter. Press f to focus, Enter to apply.",
-            id="filter",
-        )
         with Horizontal(id="main"):
-            yield DataTable(id="tracks")
+            with Vertical(id="left"):
+                yield Input(
+                    value=self.icao_filter_text,
+                    placeholder="ICAO regex filter. Press f to focus, Enter to apply.",
+                    id="filter",
+                )
+                yield Static("", id="track-detail")
+                yield DataTable(id="tracks")
             yield RichLog(
                 id="log",
                 highlight=True,
@@ -155,20 +186,10 @@ class ADSBConsoleApp(App[None]):
         self.table = self.query_one("#tracks", DataTable)
         self.summary = self.query_one("#summary", Static)
         self.filter_input = self.query_one("#filter", Input)
+        self.track_detail = self.query_one("#track-detail", Static)
         self.event_log = self.query_one("#log", RichLog)
-        self.table.add_columns(
-            "ICAO",
-            "Callsign",
-            "Msgs",
-            "Alt ft",
-            "Rng km",
-            "Az deg",
-            "El deg",
-            "RR m/s",
-            "Dop Hz",
-            "GS kt",
-            "Age s",
-        )
+        self.table.cursor_type = "row"
+        self._ensure_table_layout(OBSERVER_TABLE)
         self._write_log(f"Loaded {len(self.observers)} observer(s)")
         self.run_worker(self._monitor_source(), name="source-monitor", exclusive=True)
 
@@ -205,8 +226,16 @@ class ADSBConsoleApp(App[None]):
             await writer.wait_closed()
 
     def _refresh_table(self) -> DisplayFilterResult:
+        if self.screen_focus == TRACK_FOCUS_TABLE:
+            self._refresh_track_focus_table()
+            return self.last_filter_result
+        return self._refresh_observer_table()
+
+    def _refresh_observer_table(self) -> DisplayFilterResult:
         if self.table is None:
             return DisplayFilterResult.empty()
+        self._ensure_table_layout(OBSERVER_TABLE)
+        self._update_track_detail("")
         self.table.clear()
         now = utc_now()
         observed_tracks = self.tracker.observed_tracks(
@@ -226,8 +255,71 @@ class ADSBConsoleApp(App[None]):
         )
         for observed_track in filter_result.visible_tracks:
             track = self.tracker.tracks[observed_track.icao]
-            self.table.add_row(*_track_row(observed_track, track, now))
+            self.table.add_row(*_track_row(observed_track, track, now), key=observed_track.icao)
         return filter_result
+
+    def _refresh_track_focus_table(self) -> None:
+        if self.table is None or self.selected_track_icao is None:
+            return
+        self._ensure_table_layout(TRACK_FOCUS_TABLE)
+        self.table.clear()
+        now = utc_now()
+        snapshot = self._track_focus_snapshot(now)
+        if snapshot is None:
+            self._update_track_detail("Track focus: no selected track")
+            return
+        self.track_focus_snapshot = snapshot
+        self._update_track_detail(_track_focus_detail(snapshot, now, self.age_out_seconds))
+        for observed_track in snapshot.observed_tracks:
+            self.table.add_row(*track_focus_row(observed_track), key=observed_track.observer_name)
+
+    def _track_focus_snapshot(self, now: datetime) -> TrackFocusSnapshot | None:
+        if self.selected_track_icao is None:
+            return None
+        track = self.tracker.tracks.get(self.selected_track_icao)
+        if track is None:
+            if self.track_focus_snapshot is None:
+                return None
+            return TrackFocusSnapshot(
+                icao=self.track_focus_snapshot.icao,
+                track=self.track_focus_snapshot.track,
+                observed_tracks=self.track_focus_snapshot.observed_tracks,
+                captured_at=self.track_focus_snapshot.captured_at,
+                dropped=True,
+            )
+        observed_tracks = [
+            observed_track
+            for observer in self.observers
+            if (
+                observed_track := self.tracker.project_track(
+                    track,
+                    observer,
+                    carrier_frequency_hz=self.carrier_frequency_hz,
+                )
+            )
+            is not None
+        ]
+        return TrackFocusSnapshot(
+            icao=self.selected_track_icao,
+            track=track,
+            observed_tracks=observed_tracks,
+            captured_at=now,
+            dropped=False,
+        )
+
+    def _ensure_table_layout(self, layout: str) -> None:
+        if self.table is None or self.table_layout == layout:
+            return
+        self.table.clear(columns=True)
+        if layout == TRACK_FOCUS_TABLE:
+            self.table.add_columns(*TRACK_FOCUS_COLUMNS)
+        else:
+            self.table.add_columns(*SORT_COLUMNS)
+        self.table_layout = layout
+
+    def _update_track_detail(self, message: str) -> None:
+        if self.track_detail is not None:
+            self.track_detail.update(message)
 
     def _write_log(self, message: str) -> None:
         if self.event_log is not None:
@@ -278,6 +370,8 @@ class ADSBConsoleApp(App[None]):
             self.filter_input.focus()
 
     def action_next_sort_column(self) -> None:
+        if self.screen_focus != OBSERVER_TABLE:
+            return
         self.sort_column_index = (self.sort_column_index + 1) % len(SORT_COLUMNS)
         self.last_filter_result = self._refresh_table()
         self._write_log(f"Sort column: {self.sort_label}")
@@ -288,6 +382,43 @@ class ADSBConsoleApp(App[None]):
         self.last_filter_result = self._refresh_table()
         mode = f"hidden >{self.age_out_seconds:.0f}s" if self.hide_aged_tracks else "shown"
         self._write_log(f"Aged tracks: {mode}")
+        self._update_summary(self._summary_text())
+
+    def action_focus_selected_track(self) -> None:
+        if self.screen_focus != OBSERVER_TABLE or self.table is None:
+            return
+        if self.filter_input is not None and self.focused is self.filter_input:
+            return
+        if not self.table.is_valid_row_index(self.table.cursor_row):
+            return
+        row = self.table.get_row_at(self.table.cursor_row)
+        if not row:
+            return
+        self._enter_track_focus(str(row[0]))
+
+    def action_observer_focus(self) -> None:
+        if self.screen_focus == OBSERVER_TABLE:
+            return
+        self.screen_focus = OBSERVER_TABLE
+        self.selected_track_icao = None
+        self.track_focus_snapshot = None
+        self.last_filter_result = self._refresh_table()
+        self._write_log("Focus: observer")
+        self._update_summary(self._summary_text())
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if self.screen_focus != OBSERVER_TABLE:
+            return
+        self._enter_track_focus(str(event.row_key.value))
+
+    def _enter_track_focus(self, icao: str) -> None:
+        if not icao or icao not in self.tracker.tracks:
+            return
+        self.screen_focus = TRACK_FOCUS_TABLE
+        self.selected_track_icao = icao
+        self.track_focus_snapshot = None
+        self._refresh_track_focus_table()
+        self._write_log(f"Focus: track {icao}")
         self._update_summary(self._summary_text())
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -303,6 +434,8 @@ class ADSBConsoleApp(App[None]):
         self._update_summary(self._summary_text())
 
     def _summary_text(self, status: str | None = None) -> str:
+        if self.screen_focus == TRACK_FOCUS_TABLE:
+            return self._track_focus_summary_text(status)
         filter_result = self.last_filter_result
         display_mode = "all" if self.show_all_tracks else f"{self.max_display_range_km:.0f} km"
         filter_text = self.icao_filter_text or "none"
@@ -320,6 +453,26 @@ class ADSBConsoleApp(App[None]):
             f"Aged: {aged_text} | "
             f"Sort: {self.sort_label} | "
             f"Last: {self.last_track_icao or '-'}"
+        )
+
+    def _track_focus_summary_text(self, status: str | None = None) -> str:
+        snapshot = self.track_focus_snapshot
+        prefix = f"{status} | " if status else ""
+        selected = self.selected_track_icao or "-"
+        track_status = (
+            "-"
+            if snapshot is None
+            else track_focus_status(snapshot, utc_now(), self.age_out_seconds)
+        )
+        observer_count = 0 if snapshot is None else len(snapshot.observed_tracks)
+        return (
+            f"{prefix}Messages: {self.tracker.message_count} | "
+            f"Tracks: {len(self.tracker.tracks)} | "
+            f"Purged: {self.tracker.purged_track_count} | "
+            f"Focus: Track {selected} | "
+            f"Status: {track_status} | "
+            f"Observers: {observer_count} | "
+            f"Esc: observer focus"
         )
 
     @property
@@ -415,6 +568,67 @@ class DisplayFilterResult:
     @classmethod
     def empty(cls) -> DisplayFilterResult:
         return cls(visible_tracks=[], observer_track_count=0, hidden_count=0)
+
+
+@dataclass(frozen=True, slots=True)
+class TrackFocusSnapshot:
+    icao: str
+    track: TrackState
+    observed_tracks: list[ObservedTrack]
+    captured_at: datetime
+    dropped: bool
+
+
+def _track_focus_detail(snapshot: TrackFocusSnapshot, now: datetime, age_out_seconds: float) -> str:
+    track = snapshot.track
+    position = track.last_position
+    velocity = track.last_velocity
+    status = track_focus_status(snapshot, now, age_out_seconds)
+    lla_text = (
+        "-"
+        if position is None
+        else (
+            f"{position.latitude_deg:.6f}, {position.longitude_deg:.6f}, "
+            f"{position.altitude_ft:.0f} ft"
+        )
+    )
+    gs_text = "-" if velocity is None else f"{velocity.ground_speed_kt:.0f}"
+    age_s = (now - track.last_seen).total_seconds()
+    return (
+        f"Track focus: {status} | ICAO: {track.icao} | Callsign: {track.callsign or '-'} | "
+        f"Msgs: {track.message_count} | LLA: {lla_text}\n"
+        f"GS kt: {gs_text} | Age s: {age_s:.1f} | Esc returns to observer focus"
+    )
+
+
+def track_focus_status(snapshot: TrackFocusSnapshot, now: datetime, age_out_seconds: float) -> str:
+    if snapshot.dropped:
+        return "dropped"
+    if (now - snapshot.track.last_seen).total_seconds() > age_out_seconds:
+        return "aged-out"
+    return "active"
+
+
+def track_focus_row(
+    observed_track: ObservedTrack,
+) -> tuple[str, str, str, str, str, str, str, str]:
+    cpa = observed_track.cpa
+    return (
+        observed_track.observer_name[:10],
+        _format_optional_float(observed_track.range_az_el.range_m / 1000.0, precision=1),
+        _format_optional_float(observed_track.range_rate_mps, precision=1),
+        _format_optional_float(observed_track.range_az_el.azimuth_deg, precision=1),
+        _format_optional_float(observed_track.doppler_hz, precision=1),
+        "" if cpa is None else _format_optional_float(cpa.range_m / 1000.0, precision=1),
+        "" if cpa is None else _format_optional_float(cpa.bearing_deg, precision=1),
+        "" if cpa is None else _format_optional_float(cpa.time_s, precision=1),
+    )
+
+
+def _format_optional_float(value: float | None, *, precision: int) -> str:
+    if value is None or not isfinite(value):
+        return ""
+    return f"{value:.{precision}f}"
 
 
 def filter_display_tracks(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import atan2, cos, degrees, hypot, radians, sin, sqrt
+from math import atan2, cos, degrees, hypot, isfinite, radians, sin, sqrt
 
 from adsb_console.models import ObserverConfig, PositionReport, VelocityReport
 
@@ -59,6 +59,15 @@ class RangeAzEl:
     range_m: float
     azimuth_deg: float
     elevation_deg: float
+
+
+@dataclass(frozen=True, slots=True)
+class ClosestPointOfApproach:
+    """Closest point of approach in an observer frame."""
+
+    range_m: float
+    bearing_deg: float
+    time_s: float
 
 
 def lla_to_ecef(latitude_deg: float, longitude_deg: float, altitude_m: float) -> EcefPoint:
@@ -205,6 +214,46 @@ def range_rate_to_doppler_hz(range_rate_mps: float, carrier_frequency_hz: float)
     """Return one-way Doppler shift; closing targets have positive Doppler."""
 
     return -range_rate_mps / SPEED_OF_LIGHT_MPS * carrier_frequency_hz
+
+
+def closest_point_of_approach(
+    position: PositionReport, velocity: VelocityReport, observer: ObserverConfig
+) -> ClosestPointOfApproach | None:
+    """Return CPA geometry in the observer frame, or None when velocity is unavailable."""
+
+    target_enu = position_to_enu(position, observer)
+    velocity_enu = velocity_to_observer_enu(position, velocity, observer)
+    speed_squared = (
+        velocity_enu.east_mps * velocity_enu.east_mps
+        + velocity_enu.north_mps * velocity_enu.north_mps
+        + velocity_enu.up_mps * velocity_enu.up_mps
+    )
+    if speed_squared == 0.0:
+        return None
+
+    dot = (
+        target_enu.east_m * velocity_enu.east_mps
+        + target_enu.north_m * velocity_enu.north_mps
+        + target_enu.up_m * velocity_enu.up_mps
+    )
+    time_s = -dot / speed_squared
+    cpa_point = EnuPoint(
+        east_m=target_enu.east_m + velocity_enu.east_mps * time_s,
+        north_m=target_enu.north_m + velocity_enu.north_mps * time_s,
+        up_m=target_enu.up_m + velocity_enu.up_mps * time_s,
+    )
+    cpa_range_az_el = enu_to_range_az_el(cpa_point)
+    if not (
+        isfinite(time_s)
+        and isfinite(cpa_range_az_el.range_m)
+        and isfinite(cpa_range_az_el.azimuth_deg)
+    ):
+        return None
+    return ClosestPointOfApproach(
+        range_m=cpa_range_az_el.range_m,
+        bearing_deg=cpa_range_az_el.azimuth_deg,
+        time_s=time_s,
+    )
 
 
 def is_observable_by(

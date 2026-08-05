@@ -8,7 +8,9 @@ from datetime import datetime, timedelta
 
 from adsb_console.models import BaseStationMessage, ObserverConfig, TrackState, utc_now
 from adsb_console.transforms import (
+    ClosestPointOfApproach,
     RangeAzEl,
+    closest_point_of_approach,
     is_observable_by,
     position_to_range_az_el,
     position_velocity_to_range_rate_mps,
@@ -28,6 +30,7 @@ class ObservedTrack:
     range_az_el: RangeAzEl
     range_rate_mps: float | None
     doppler_hz: float | None
+    cpa: ClosestPointOfApproach | None
     reported_at: datetime
 
 
@@ -110,33 +113,57 @@ class BaseStationTracker:
             for track in self._tracks.values():
                 if track.last_position is None:
                     continue
-                range_az_el = position_to_range_az_el(track.last_position, observer)
+                observed_track = self.project_track(
+                    track, observer, carrier_frequency_hz=carrier_frequency_hz
+                )
+                if observed_track is None:
+                    continue
                 regex_match = seeker.fullmatch(track.icao) is not None
                 specific_regex = observer.seek_pattern.strip() not in {"", ".*", ".+"}
                 if (
                     not observer.is_local
                     and not (specific_regex and regex_match)
-                    and not is_observable_by(track.last_position, range_az_el, observer)
+                    and not is_observable_by(
+                        track.last_position, observed_track.range_az_el, observer
+                    )
                 ):
                     continue
-                range_rate_mps = (
-                    None
-                    if track.last_velocity is None
-                    else position_velocity_to_range_rate_mps(
-                        track.last_position, track.last_velocity, observer
-                    )
-                )
-                observed.append(
-                    ObservedTrack(
-                        observer_name=observer.name,
-                        icao=track.icao,
-                        callsign=track.callsign,
-                        range_az_el=range_az_el,
-                        range_rate_mps=range_rate_mps,
-                        doppler_hz=None
-                        if range_rate_mps is None
-                        else range_rate_to_doppler_hz(range_rate_mps, carrier_frequency_hz),
-                        reported_at=track.last_position.reported_at,
-                    )
-                )
+                observed.append(observed_track)
         return observed
+
+    def project_track(
+        self,
+        track: TrackState,
+        observer: ObserverConfig,
+        *,
+        carrier_frequency_hz: float,
+    ) -> ObservedTrack | None:
+        """Project one track into one observer frame without applying remote gates."""
+
+        if track.last_position is None:
+            return None
+        range_az_el = position_to_range_az_el(track.last_position, observer)
+        range_rate_mps = (
+            None
+            if track.last_velocity is None
+            else position_velocity_to_range_rate_mps(
+                track.last_position, track.last_velocity, observer
+            )
+        )
+        cpa = (
+            None
+            if track.last_velocity is None
+            else closest_point_of_approach(track.last_position, track.last_velocity, observer)
+        )
+        return ObservedTrack(
+            observer_name=observer.name,
+            icao=track.icao,
+            callsign=track.callsign,
+            range_az_el=range_az_el,
+            range_rate_mps=range_rate_mps,
+            doppler_hz=None
+            if range_rate_mps is None
+            else range_rate_to_doppler_hz(range_rate_mps, carrier_frequency_hz),
+            cpa=cpa,
+            reported_at=track.last_position.reported_at,
+        )
