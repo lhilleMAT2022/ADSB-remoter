@@ -43,6 +43,7 @@ The TUI redraws the table at a bounded screen refresh rate instead of rebuilding
 - `a`: toggle all tracks versus filtered display
 - `+` / `-`: increase or decrease the maximum display range
 - `f`: focus the ICAO regex filter; press Enter to apply
+- `s`: cycle the active sort column
 
 The summary line reports visible and hidden track counts.
 

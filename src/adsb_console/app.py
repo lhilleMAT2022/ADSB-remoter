@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +23,29 @@ DEFAULT_SCREEN_REFRESH_HZ = 0.5
 DEFAULT_MAX_DISPLAY_RANGE_KM = 200.0
 DISPLAY_RANGE_STEP_KM = 25.0
 DEFAULT_MAX_FILTERED_ROWS = 200
+SORT_COLUMNS = (
+    "ICAO",
+    "Callsign",
+    "Msgs",
+    "Alt ft",
+    "Rng km",
+    "Az deg",
+    "El deg",
+    "GS kt",
+    "Age s",
+)
+SORT_DIRECTIONS: Mapping[str, bool] = {
+    "ICAO": False,
+    "Callsign": False,
+    "Msgs": True,
+    "Alt ft": True,
+    "Rng km": False,
+    "Az deg": False,
+    "El deg": True,
+    "GS kt": True,
+    "Age s": False,
+}
+DEFAULT_SORT_COLUMN = "Rng km"
 
 
 class ADSBConsoleApp(App[None]):
@@ -54,6 +78,7 @@ class ADSBConsoleApp(App[None]):
         ("f", "focus_filter", "Filter ICAO"),
         ("o", "next_observer", "Next observer"),
         ("q", "quit", "Quit"),
+        ("s", "next_sort_column", "Sort column"),
     ]
 
     def __init__(
@@ -76,6 +101,7 @@ class ADSBConsoleApp(App[None]):
         self.show_all_tracks = False
         self.icao_filter_text = icao_filter
         self.icao_filter = _compile_icao_filter(icao_filter)
+        self.sort_column_index = SORT_COLUMNS.index(DEFAULT_SORT_COLUMN)
         self.last_track_icao = ""
         self.last_filter_result = DisplayFilterResult.empty()
         self.table: DataTable[str] | None = None
@@ -150,6 +176,9 @@ class ADSBConsoleApp(App[None]):
             icao_filter=self.icao_filter,
             max_range_km=None if self.show_all_tracks else self.max_display_range_km,
             max_rows=None if self.show_all_tracks else DEFAULT_MAX_FILTERED_ROWS,
+            track_lookup=self.tracker.tracks,
+            sort_column=self.sort_column,
+            now=now,
         )
         for observed_track in filter_result.visible_tracks:
             track = self.tracker.tracks[observed_track.icao]
@@ -204,6 +233,12 @@ class ADSBConsoleApp(App[None]):
         if self.filter_input is not None:
             self.filter_input.focus()
 
+    def action_next_sort_column(self) -> None:
+        self.sort_column_index = (self.sort_column_index + 1) % len(SORT_COLUMNS)
+        self.last_filter_result = self._refresh_table()
+        self._write_log(f"Sort column: {self.sort_label}")
+        self._update_summary(self._summary_text())
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.icao_filter_text = event.value.strip()
         try:
@@ -229,8 +264,18 @@ class ADSBConsoleApp(App[None]):
             f"Hidden: {filter_result.hidden_count} | "
             f"Range: {display_mode} | "
             f"ICAO: {filter_text} | "
+            f"Sort: {self.sort_label} | "
             f"Last: {self.last_track_icao or '-'}"
         )
+
+    @property
+    def sort_column(self) -> str:
+        return SORT_COLUMNS[self.sort_column_index]
+
+    @property
+    def sort_label(self) -> str:
+        direction = "desc" if SORT_DIRECTIONS[self.sort_column] else "asc"
+        return f"{self.sort_column} {direction}"
 
 
 def main() -> None:
@@ -307,6 +352,9 @@ def filter_display_tracks(
     icao_filter: re.Pattern[str] | None,
     max_range_km: float | None,
     max_rows: int | None,
+    track_lookup: Mapping[str, TrackState] | None = None,
+    sort_column: str | None = None,
+    now: datetime | None = None,
 ) -> DisplayFilterResult:
     filtered: list[ObservedTrack] = []
     for observed_track in observed_tracks:
@@ -316,6 +364,9 @@ def filter_display_tracks(
             continue
         filtered.append(observed_track)
 
+    if track_lookup is not None and sort_column is not None and now is not None:
+        filtered = sort_display_tracks(filtered, track_lookup, sort_column, now)
+
     visible_tracks = filtered if max_rows is None else filtered[:max_rows]
     hidden_count = len(observed_tracks) - len(visible_tracks)
     return DisplayFilterResult(
@@ -323,6 +374,103 @@ def filter_display_tracks(
         observer_track_count=len(observed_tracks),
         hidden_count=hidden_count,
     )
+
+
+def sort_display_tracks(
+    observed_tracks: list[ObservedTrack],
+    track_lookup: Mapping[str, TrackState],
+    sort_column: str,
+    now: datetime,
+) -> list[ObservedTrack]:
+    reverse = SORT_DIRECTIONS.get(sort_column, False)
+    if sort_column == "ICAO":
+        sorted_tracks = sorted(observed_tracks, key=lambda item: item.icao, reverse=reverse)
+    elif sort_column == "Callsign":
+        sorted_tracks = sorted(
+            observed_tracks,
+            key=lambda item: _track_callsign(track_lookup, item),
+            reverse=reverse,
+        )
+    elif sort_column == "Msgs":
+        sorted_tracks = sorted(
+            observed_tracks,
+            key=lambda item: _track_message_count(track_lookup, item),
+            reverse=reverse,
+        )
+    elif sort_column == "Alt ft":
+        sorted_tracks = sorted(
+            observed_tracks,
+            key=lambda item: _track_altitude_ft(track_lookup, item),
+            reverse=reverse,
+        )
+    elif sort_column == "Rng km":
+        sorted_tracks = sorted(
+            observed_tracks,
+            key=lambda item: item.range_az_el.range_m,
+            reverse=reverse,
+        )
+    elif sort_column == "Az deg":
+        sorted_tracks = sorted(
+            observed_tracks, key=lambda item: item.range_az_el.azimuth_deg, reverse=reverse
+        )
+    elif sort_column == "El deg":
+        sorted_tracks = sorted(
+            observed_tracks, key=lambda item: item.range_az_el.elevation_deg, reverse=reverse
+        )
+    elif sort_column == "GS kt":
+        sorted_tracks = sorted(
+            observed_tracks,
+            key=lambda item: _track_ground_speed_kt(track_lookup, item),
+            reverse=reverse,
+        )
+    elif sort_column == "Age s":
+        sorted_tracks = sorted(
+            observed_tracks,
+            key=lambda item: _track_age_s(track_lookup, item, now),
+            reverse=reverse,
+        )
+    else:
+        sorted_tracks = observed_tracks
+    return sorted_tracks
+
+
+def _track_callsign(track_lookup: Mapping[str, TrackState], observed_track: ObservedTrack) -> str:
+    track = track_lookup.get(observed_track.icao)
+    return "" if track is None or track.callsign is None else track.callsign
+
+
+def _track_message_count(
+    track_lookup: Mapping[str, TrackState], observed_track: ObservedTrack
+) -> int:
+    track = track_lookup.get(observed_track.icao)
+    return 0 if track is None else track.message_count
+
+
+def _track_altitude_ft(
+    track_lookup: Mapping[str, TrackState], observed_track: ObservedTrack
+) -> float:
+    track = track_lookup.get(observed_track.icao)
+    if track is None or track.last_position is None:
+        return float("-inf")
+    return track.last_position.altitude_ft
+
+
+def _track_ground_speed_kt(
+    track_lookup: Mapping[str, TrackState], observed_track: ObservedTrack
+) -> float:
+    track = track_lookup.get(observed_track.icao)
+    if track is None or track.last_velocity is None:
+        return float("-inf")
+    return track.last_velocity.ground_speed_kt
+
+
+def _track_age_s(
+    track_lookup: Mapping[str, TrackState], observed_track: ObservedTrack, now: datetime
+) -> float:
+    track = track_lookup.get(observed_track.icao)
+    if track is None:
+        return float("inf")
+    return (now - track.last_seen).total_seconds()
 
 
 def _compile_icao_filter(pattern: str) -> re.Pattern[str] | None:

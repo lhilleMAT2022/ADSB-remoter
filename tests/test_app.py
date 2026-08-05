@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 
 from adsb_console.app import ADSBConsoleApp, filter_display_tracks, refresh_interval_s
+from adsb_console.models import TrackState
 from adsb_console.tracker import ObservedTrack
 from adsb_console.transforms import RangeAzEl
 
@@ -45,6 +46,51 @@ def test_refresh_interval_from_rate() -> None:
     assert refresh_interval_s(0.0) == 0.0
 
 
+def test_filter_display_tracks_sorts_by_range_before_row_limit() -> None:
+    tracks = [
+        _observed_track("FAR", 300_000.0),
+        _observed_track("NEAR", 10_000.0),
+        _observed_track("MID", 20_000.0),
+    ]
+
+    result = filter_display_tracks(
+        observed_tracks=tracks,
+        icao_filter=None,
+        max_range_km=None,
+        max_rows=2,
+        track_lookup={},
+        sort_column="Rng km",
+        now=datetime.now(),
+    )
+
+    assert [track.icao for track in result.visible_tracks] == ["NEAR", "MID"]
+    assert result.hidden_count == 1
+
+
+def test_filter_display_tracks_sorts_by_message_count_before_row_limit() -> None:
+    now = datetime.now()
+    tracks = [
+        _observed_track("LOW", 10_000.0),
+        _observed_track("HIGH", 20_000.0),
+    ]
+
+    result = filter_display_tracks(
+        observed_tracks=tracks,
+        icao_filter=None,
+        max_range_km=None,
+        max_rows=1,
+        track_lookup={
+            "LOW": _track_state("LOW", now, message_count=1),
+            "HIGH": _track_state("HIGH", now, message_count=99),
+        },
+        sort_column="Msgs",
+        now=now,
+    )
+
+    assert [track.icao for track in result.visible_tracks] == ["HIGH"]
+    assert result.hidden_count == 1
+
+
 def _observed_track(icao: str, range_m: float) -> ObservedTrack:
     return ObservedTrack(
         observer_name="observer",
@@ -52,4 +98,13 @@ def _observed_track(icao: str, range_m: float) -> ObservedTrack:
         callsign=None,
         range_az_el=RangeAzEl(range_m=range_m, azimuth_deg=0.0, elevation_deg=0.0),
         reported_at=datetime.now(),
+    )
+
+
+def _track_state(icao: str, now: datetime, message_count: int) -> TrackState:
+    return TrackState(
+        icao=icao,
+        first_seen=now,
+        last_seen=now,
+        message_count=message_count,
     )
