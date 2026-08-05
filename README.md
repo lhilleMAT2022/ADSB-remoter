@@ -18,7 +18,7 @@ The runtime dependency set is intentionally small. Textual provides the TUI; Bas
 Replay one or more recorded BaseStation files over TCP:
 
 ```powershell
-adsb-playback ..\000_sbs_for_ELAD_cleanup\sbs_clean\10_adsb_20220413_060850.csv --bind 127.0.0.1:28887
+adsb-playback .\tests\fixtures\sbs_clean\10_adsb_20220413_060850.csv.gz --bind 127.0.0.1:28887
 ```
 
 The playback server logs client connections, clean disconnects, and periodic sent-message summaries. Use `--status-interval 5` to change the status cadence.
