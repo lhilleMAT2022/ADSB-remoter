@@ -54,3 +54,12 @@ $env:PYRIGHT_PYTHON_CACHE_DIR=(Resolve-Path .\.pyright-cache).Path; pyright
 ```
 
 The cache flags and environment variable avoid local OneDrive/cache permission issues seen on this workstation.
+
+## Local Launchers
+
+If the editable package has not been installed into `.venv`, use the checked-in PowerShell launchers. They set `PYTHONPATH=src` before running the module.
+
+```powershell
+.\scripts\adsb-playback.ps1 .\tests\fixtures\sbs_clean\10_adsb_20220413_060850.csv.gz --bind 127.0.0.1:28887
+.\scripts\adsb-console.ps1 -Source 127.0.0.1:28887
+```

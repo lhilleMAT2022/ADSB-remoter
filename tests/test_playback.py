@@ -38,6 +38,23 @@ async def test_replay_messages_from_gzip_file() -> None:
     assert messages[0].icao == "A5CDE9"
 
 
+@pytest.mark.asyncio
+async def test_replay_messages_from_sbs_clean_gzip_fixture() -> None:
+    gzip_files = _sbs_clean_gzip_fixtures()
+    assert gzip_files
+    config = PlaybackConfig(
+        files=(gzip_files[0],),
+        max_lines=100,
+        preserve_timing=False,
+        rebase_timestamps=False,
+    )
+
+    messages = [message async for message in replay_messages(config)]
+
+    assert len(messages) == 100
+    assert {message.icao for message in messages}
+
+
 def _gzip_fixture() -> Path:
     source = Path("tests/fixtures/basestation_sample.csv")
     scratch = Path("tests/.scratch")
@@ -45,6 +62,10 @@ def _gzip_fixture() -> Path:
     compressed = scratch / "basestation_sample.csv.gz"
     compressed.write_bytes(gzip.compress(source.read_bytes()))
     return compressed
+
+
+def _sbs_clean_gzip_fixtures() -> tuple[Path, ...]:
+    return tuple(sorted(Path("tests/fixtures/sbs_clean").glob("*.gz")))
 
 
 def test_status_helpers() -> None:
