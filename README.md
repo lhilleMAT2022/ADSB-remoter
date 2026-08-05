@@ -37,6 +37,15 @@ adsb-console --source 127.0.0.1:28887 --observerfile .\tests\fixtures\observers.
 
 Without an observer file, the default local observer is Goat Island Lighthouse in Newport, RI, and the default remote observer is MathWorks Apple Hill.
 
+The TUI redraws the table at a bounded screen refresh rate instead of rebuilding it for every incoming SBS message. Use `--refresh-rate 0.5` or similar to tune the display cadence. Display controls:
+
+- `o`: cycle observers
+- `a`: toggle all tracks versus filtered display
+- `+` / `-`: increase or decrease the maximum display range
+- `f`: focus the ICAO regex filter; press Enter to apply
+
+The summary line reports visible and hidden track counts.
+
 Relay a BaseStation TCP stream to one or more UDP destinations:
 
 ```powershell

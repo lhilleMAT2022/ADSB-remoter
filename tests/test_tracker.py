@@ -53,3 +53,26 @@ def test_local_observer_projects_all_positioned_tracks_without_remote_gates() ->
 
     assert len(observed) == 1
     assert observed[0].icao == "A5CDE9"
+
+
+def test_remote_observer_specific_icao_regex_can_include_track_outside_geometry() -> None:
+    tracker = BaseStationTracker()
+    tracker.update_line(
+        "MSG,3,1,1,A5CDE9,1,2025/08/12,12:20:30.797,2025/08/12,12:20:30.827,,"
+        "5200,,,42.33270,-71.35499,,,0,,0,0"
+    )
+    observer = ObserverConfig(
+        name="remote",
+        role=ObserverRole.REMOTE,
+        latitude_deg=42.0,
+        longitude_deg=-71.0,
+        altitude_m=0.0,
+        seek_pattern="A5CDE9",
+        min_range_m=1_000_000.0,
+        max_range_m=1_000_001.0,
+    )
+
+    observed = tracker.observed_tracks([observer])
+
+    assert len(observed) == 1
+    assert observed[0].icao == "A5CDE9"

@@ -72,10 +72,14 @@ class BaseStationTracker:
             for track in self._tracks.values():
                 if track.last_position is None:
                     continue
-                if not observer.is_local and seeker.fullmatch(track.icao) is None:
-                    continue
                 range_az_el = position_to_range_az_el(track.last_position, observer)
-                if not is_observable_by(track.last_position, range_az_el, observer):
+                regex_match = seeker.fullmatch(track.icao) is not None
+                specific_regex = observer.seek_pattern.strip() not in {"", ".*", ".+"}
+                if (
+                    not observer.is_local
+                    and not (specific_regex and regex_match)
+                    and not is_observable_by(track.last_position, range_az_el, observer)
+                ):
                     continue
                 observed.append(
                     ObservedTrack(
