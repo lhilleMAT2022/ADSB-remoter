@@ -43,9 +43,10 @@ The TUI redraws the table at a bounded screen refresh rate instead of rebuilding
 - `a`: toggle all tracks versus filtered display
 - `+` / `-`: increase or decrease the maximum display range
 - `f`: focus the ICAO regex filter; press Enter to apply
+- `h`: toggle aged-out tracks hidden or shown
 - `s`: cycle the active sort column
 
-The summary line reports visible and hidden track counts.
+Tracks with no reports for more than 20 seconds are hidden by default. The summary line reports visible and hidden track counts.
 
 Relay a BaseStation TCP stream to one or more UDP destinations:
 

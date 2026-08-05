@@ -23,6 +23,7 @@ DEFAULT_SCREEN_REFRESH_HZ = 0.5
 DEFAULT_MAX_DISPLAY_RANGE_KM = 200.0
 DISPLAY_RANGE_STEP_KM = 25.0
 DEFAULT_MAX_FILTERED_ROWS = 200
+DEFAULT_AGE_OUT_SECONDS = 20.0
 SORT_COLUMNS = (
     "ICAO",
     "Callsign",
@@ -76,6 +77,7 @@ class ADSBConsoleApp(App[None]):
         ("=", "increase_range", "More range"),
         ("-", "decrease_range", "Less range"),
         ("f", "focus_filter", "Filter ICAO"),
+        ("h", "toggle_aged_tracks", "Hide aged"),
         ("o", "next_observer", "Next observer"),
         ("q", "quit", "Quit"),
         ("s", "next_sort_column", "Sort column"),
@@ -90,6 +92,8 @@ class ADSBConsoleApp(App[None]):
         refresh_rate_hz: float = DEFAULT_SCREEN_REFRESH_HZ,
         max_display_range_km: float = DEFAULT_MAX_DISPLAY_RANGE_KM,
         icao_filter: str = "",
+        hide_aged_tracks: bool = True,
+        age_out_seconds: float = DEFAULT_AGE_OUT_SECONDS,
     ) -> None:
         super().__init__()
         self.source = source
@@ -99,6 +103,8 @@ class ADSBConsoleApp(App[None]):
         self.refresh_interval_s = refresh_interval_s(refresh_rate_hz)
         self.max_display_range_km = max_display_range_km
         self.show_all_tracks = False
+        self.hide_aged_tracks = hide_aged_tracks
+        self.age_out_seconds = age_out_seconds
         self.icao_filter_text = icao_filter
         self.icao_filter = _compile_icao_filter(icao_filter)
         self.sort_column_index = SORT_COLUMNS.index(DEFAULT_SORT_COLUMN)
@@ -179,6 +185,8 @@ class ADSBConsoleApp(App[None]):
             track_lookup=self.tracker.tracks,
             sort_column=self.sort_column,
             now=now,
+            hide_aged_tracks=self.hide_aged_tracks,
+            age_out_seconds=self.age_out_seconds,
         )
         for observed_track in filter_result.visible_tracks:
             track = self.tracker.tracks[observed_track.icao]
@@ -239,6 +247,13 @@ class ADSBConsoleApp(App[None]):
         self._write_log(f"Sort column: {self.sort_label}")
         self._update_summary(self._summary_text())
 
+    def action_toggle_aged_tracks(self) -> None:
+        self.hide_aged_tracks = not self.hide_aged_tracks
+        self.last_filter_result = self._refresh_table()
+        mode = f"hidden >{self.age_out_seconds:.0f}s" if self.hide_aged_tracks else "shown"
+        self._write_log(f"Aged tracks: {mode}")
+        self._update_summary(self._summary_text())
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.icao_filter_text = event.value.strip()
         try:
@@ -255,6 +270,7 @@ class ADSBConsoleApp(App[None]):
         filter_result = self.last_filter_result
         display_mode = "all" if self.show_all_tracks else f"{self.max_display_range_km:.0f} km"
         filter_text = self.icao_filter_text or "none"
+        aged_text = f"hidden >{self.age_out_seconds:.0f}s" if self.hide_aged_tracks else "shown"
         prefix = f"{status} | " if status else ""
         return (
             f"{prefix}Messages: {self.tracker.message_count} | "
@@ -264,6 +280,7 @@ class ADSBConsoleApp(App[None]):
             f"Hidden: {filter_result.hidden_count} | "
             f"Range: {display_mode} | "
             f"ICAO: {filter_text} | "
+            f"Aged: {aged_text} | "
             f"Sort: {self.sort_label} | "
             f"Last: {self.last_track_icao or '-'}"
         )
@@ -286,6 +303,8 @@ def main() -> None:
     parser.add_argument("--refresh-rate", default=DEFAULT_SCREEN_REFRESH_HZ, type=float)
     parser.add_argument("--max-display-range-km", default=DEFAULT_MAX_DISPLAY_RANGE_KM, type=float)
     parser.add_argument("--icao-filter", default="")
+    parser.add_argument("--show-aged-tracks", action="store_true")
+    parser.add_argument("--age-out-seconds", default=DEFAULT_AGE_OUT_SECONDS, type=float)
     args = parser.parse_args()
 
     ADSBConsoleApp(
@@ -295,6 +314,8 @@ def main() -> None:
         refresh_rate_hz=args.refresh_rate,
         max_display_range_km=args.max_display_range_km,
         icao_filter=args.icao_filter,
+        hide_aged_tracks=not args.show_aged_tracks,
+        age_out_seconds=args.age_out_seconds,
     ).run()
 
 
@@ -355,9 +376,13 @@ def filter_display_tracks(
     track_lookup: Mapping[str, TrackState] | None = None,
     sort_column: str | None = None,
     now: datetime | None = None,
+    hide_aged_tracks: bool = True,
+    age_out_seconds: float = DEFAULT_AGE_OUT_SECONDS,
 ) -> DisplayFilterResult:
     filtered: list[ObservedTrack] = []
     for observed_track in observed_tracks:
+        if hide_aged_tracks and _is_aged_track(observed_track, track_lookup, now, age_out_seconds):
+            continue
         if max_range_km is not None and observed_track.range_az_el.range_m > max_range_km * 1000.0:
             continue
         if icao_filter is not None and icao_filter.search(observed_track.icao) is None:
@@ -374,6 +399,20 @@ def filter_display_tracks(
         observer_track_count=len(observed_tracks),
         hidden_count=hidden_count,
     )
+
+
+def _is_aged_track(
+    observed_track: ObservedTrack,
+    track_lookup: Mapping[str, TrackState] | None,
+    now: datetime | None,
+    age_out_seconds: float,
+) -> bool:
+    if track_lookup is None or now is None:
+        return False
+    track = track_lookup.get(observed_track.icao)
+    if track is None:
+        return True
+    return (now - track.last_seen).total_seconds() > age_out_seconds
 
 
 def sort_display_tracks(

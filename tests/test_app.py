@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from adsb_console.app import ADSBConsoleApp, filter_display_tracks, refresh_interval_s
 from adsb_console.models import TrackState
@@ -61,6 +61,7 @@ def test_filter_display_tracks_sorts_by_range_before_row_limit() -> None:
         track_lookup={},
         sort_column="Rng km",
         now=datetime.now(),
+        hide_aged_tracks=False,
     )
 
     assert [track.icao for track in result.visible_tracks] == ["NEAR", "MID"]
@@ -91,6 +92,59 @@ def test_filter_display_tracks_sorts_by_message_count_before_row_limit() -> None
     assert result.hidden_count == 1
 
 
+def test_filter_display_tracks_hides_aged_tracks_by_default() -> None:
+    now = datetime.now()
+    tracks = [
+        _observed_track("FRESH", 10_000.0),
+        _observed_track("AGED", 20_000.0),
+    ]
+    track_lookup = {
+        "FRESH": _track_state("FRESH", now, message_count=1),
+        "AGED": _track_state("AGED", now - timedelta(seconds=30), message_count=1),
+    }
+
+    result = filter_display_tracks(
+        observed_tracks=tracks,
+        icao_filter=None,
+        max_range_km=None,
+        max_rows=None,
+        track_lookup=track_lookup,
+        sort_column="Rng km",
+        now=now,
+        age_out_seconds=20.0,
+    )
+
+    assert [track.icao for track in result.visible_tracks] == ["FRESH"]
+    assert result.observer_track_count == 2
+    assert result.hidden_count == 1
+
+
+def test_filter_display_tracks_can_show_aged_tracks() -> None:
+    now = datetime.now()
+    tracks = [
+        _observed_track("FRESH", 10_000.0),
+        _observed_track("AGED", 20_000.0),
+    ]
+
+    result = filter_display_tracks(
+        observed_tracks=tracks,
+        icao_filter=None,
+        max_range_km=None,
+        max_rows=None,
+        track_lookup={
+            "FRESH": _track_state("FRESH", now, message_count=1),
+            "AGED": _track_state("AGED", now - timedelta(seconds=30), message_count=1),
+        },
+        sort_column="Rng km",
+        now=now,
+        hide_aged_tracks=False,
+        age_out_seconds=20.0,
+    )
+
+    assert [track.icao for track in result.visible_tracks] == ["FRESH", "AGED"]
+    assert result.hidden_count == 0
+
+
 def _observed_track(icao: str, range_m: float) -> ObservedTrack:
     return ObservedTrack(
         observer_name="observer",
@@ -101,10 +155,10 @@ def _observed_track(icao: str, range_m: float) -> ObservedTrack:
     )
 
 
-def _track_state(icao: str, now: datetime, message_count: int) -> TrackState:
+def _track_state(icao: str, last_seen: datetime, message_count: int) -> TrackState:
     return TrackState(
         icao=icao,
-        first_seen=now,
-        last_seen=now,
+        first_seen=last_seen,
+        last_seen=last_seen,
         message_count=message_count,
     )
