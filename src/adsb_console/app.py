@@ -20,6 +20,7 @@ from adsb_console.bistatic import (
     BistaticMeasurement,
     DtvEmitter,
     load_dtv_emitters,
+    parse_dtv_bands,
     top_bistatic_measurements,
 )
 from adsb_console.config import load_observers_or_default, parse_endpoint
@@ -39,6 +40,7 @@ DEFAULT_CARRIER_FREQUENCY_MHZ = 600.0
 DEFAULT_LOG_MAX_LINES = 1_000
 DEFAULT_TRACK_RETENTION_MINUTES = DEFAULT_STALE_TRACK_SECONDS / 60.0
 DEFAULT_DTV_FILE = Path("20_DTV_direct_path_input.csv")
+DEFAULT_DTV_BANDS = "uhf"
 DEFAULT_BISTATIC_DISPLAY_TRACKS = 10
 OBSERVER_TABLE = "observer"
 TRACK_FOCUS_TABLE = "track-focus"
@@ -151,6 +153,7 @@ class ADSBConsoleApp(App[None]):
         carrier_frequency_mhz: float = DEFAULT_CARRIER_FREQUENCY_MHZ,
         track_retention_minutes: float = DEFAULT_TRACK_RETENTION_MINUTES,
         dtv_file: Path | None = DEFAULT_DTV_FILE,
+        dtv_bands: str = DEFAULT_DTV_BANDS,
         bistatic_display_tracks: int = DEFAULT_BISTATIC_DISPLAY_TRACKS,
     ) -> None:
         super().__init__()
@@ -168,8 +171,10 @@ class ADSBConsoleApp(App[None]):
         self.hide_aged_tracks = hide_aged_tracks
         self.age_out_seconds = age_out_seconds
         self.carrier_frequency_hz = carrier_frequency_mhz * 1_000_000.0
-        self.dtv_emitters = load_dtv_emitters(dtv_file)
+        self.dtv_bands = parse_dtv_bands(dtv_bands)
+        self.dtv_emitters = load_dtv_emitters(dtv_file, self.dtv_bands)
         self.bistatic_display_tracks = max(bistatic_display_tracks, 0)
+        self.reported_bistatic_towers: set[tuple[str, str, str]] = set()
         self.icao_filter_text = icao_filter
         self.icao_filter = _compile_icao_filter(icao_filter)
         self.sort_column_index = SORT_COLUMNS.index(DEFAULT_SORT_COLUMN)
@@ -284,6 +289,14 @@ class ADSBConsoleApp(App[None]):
             self.dtv_emitters,
             track_limit=self.bistatic_display_tracks,
         )
+        self._log_bistatic_towers(
+            self.selected_observer,
+            [
+                measurement
+                for measurements in bistatic_by_icao.values()
+                for measurement in measurements
+            ],
+        )
         for observed_track in filter_result.visible_tracks:
             track = self.tracker.tracks[observed_track.icao]
             self.table.add_row(
@@ -321,6 +334,10 @@ class ADSBConsoleApp(App[None]):
                     velocity=track.last_velocity,
                     count=5,
                 )
+            )
+            self._log_bistatic_towers(
+                _observer_by_name(self.observers, observed_track.observer_name),
+                measurements,
             )
             self.table.add_row(
                 *track_focus_row(observed_track, measurements),
@@ -379,6 +396,16 @@ class ADSBConsoleApp(App[None]):
         if self.event_log is not None:
             self.event_log.write(message)
 
+    def _log_bistatic_towers(
+        self, receiver: ObserverConfig, measurements: list[BistaticMeasurement]
+    ) -> None:
+        for measurement in measurements:
+            key = (self.screen_focus, receiver.name, measurement.emitter.tower_key)
+            if key in self.reported_bistatic_towers:
+                continue
+            self.reported_bistatic_towers.add(key)
+            self._write_log(_bistatic_tower_log_line(receiver, measurement))
+
     def _update_summary(self, message: str) -> None:
         if self.summary is not None:
             self.summary.update(message)
@@ -389,6 +416,7 @@ class ADSBConsoleApp(App[None]):
 
     def action_next_observer(self) -> None:
         self.selected_observer_index = (self.selected_observer_index + 1) % len(self.observers)
+        self.reported_bistatic_towers.clear()
         self.last_filter_result = self._refresh_table()
         observer = self.selected_observer
         self._write_log(f"Selected observer: {observer.name} ({observer.role.value})")
@@ -454,6 +482,7 @@ class ADSBConsoleApp(App[None]):
         if self.screen_focus == OBSERVER_TABLE:
             return
         self.screen_focus = OBSERVER_TABLE
+        self.reported_bistatic_towers.clear()
         self.selected_track_icao = None
         self.track_focus_snapshot = None
         self.last_filter_result = self._refresh_table()
@@ -469,6 +498,7 @@ class ADSBConsoleApp(App[None]):
         if not icao or icao not in self.tracker.tracks:
             return
         self.screen_focus = TRACK_FOCUS_TABLE
+        self.reported_bistatic_towers.clear()
         self.selected_track_icao = icao
         self.track_focus_snapshot = None
         self._refresh_track_focus_table()
@@ -565,6 +595,11 @@ def main() -> None:
         help="CSV file of DTV emitters used for passive bistatic SNR estimates.",
     )
     parser.add_argument(
+        "--dtv-bands",
+        default=DEFAULT_DTV_BANDS,
+        help="Comma-separated DTV bands to include: low-vhf, high-vhf, uhf, or all.",
+    )
+    parser.add_argument(
         "--bistatic-display-tracks",
         default=DEFAULT_BISTATIC_DISPLAY_TRACKS,
         type=int,
@@ -584,6 +619,7 @@ def main() -> None:
         carrier_frequency_mhz=args.carrier_frequency_mhz,
         track_retention_minutes=args.track_retention_minutes,
         dtv_file=args.dtv_file,
+        dtv_bands=args.dtv_bands,
         bistatic_display_tracks=args.bistatic_display_tracks,
     ).run()
 
@@ -747,11 +783,7 @@ def _format_bistatic_summary(
     if index >= len(measurements):
         return ""
     measurement = measurements[index]
-    emitter_label = (
-        measurement.emitter.call_sign if include_bearing else measurement.emitter.site_name
-    )
-    if not emitter_label:
-        emitter_label = measurement.emitter.call_sign or measurement.emitter.site_name or "DTV"
+    emitter_label = measurement.emitter.call_sign or measurement.emitter.site_name or "DTV"
     bearing = f" @{measurement.bearing_to_emitter_deg:.0f}°" if include_bearing else ""
     doppler = (
         ""
@@ -760,10 +792,20 @@ def _format_bistatic_summary(
     )
     return (
         f"{emitter_label[:12]}{bearing}: "
-        f"{measurement.emitter.center_frequency_mhz:.0f}MHz "
         f"{measurement.snr_db:.0f}dB "
         f"{measurement.bistatic_range_km:.0f}km"
         f"{doppler}"
+    )
+
+
+def _bistatic_tower_log_line(receiver: ObserverConfig, measurement: BistaticMeasurement) -> str:
+    return (
+        "DTV tower | "
+        f"Obs: {receiver.name[:10]} | "
+        f"Call: {measurement.emitter.call_sign or '-'} | "
+        f"Site: {(measurement.emitter.site_name or '-')[:24]} | "
+        f"Freq: {measurement.emitter.center_frequency_mhz:.0f} MHz | "
+        f"Bearing: {measurement.bearing_to_emitter_deg:.0f} deg"
     )
 
 

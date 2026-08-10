@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
+from enum import StrEnum
 from math import log10, pi
 from pathlib import Path
 
@@ -25,12 +26,22 @@ STANDARD_NOISE_TEMPERATURE_K = 290.0
 DEFAULT_RCS_DBSM = 10.0
 
 
+class DtvBand(StrEnum):
+    """Supported DTV bands for illuminator filtering."""
+
+    LOW_VHF = "low-vhf"
+    HIGH_VHF = "high-vhf"
+    UHF = "uhf"
+
+
 @dataclass(frozen=True, slots=True)
 class DtvEmitter:
     """DTV transmitter entry used as a passive-radar illuminator."""
 
+    facility_id: str
     call_sign: str
     site_name: str
+    asrn: str
     rf_channel: int
     center_frequency_mhz: float
     latitude_deg: float
@@ -48,6 +59,19 @@ class DtvEmitter:
             altitude_m=self.altitude_m,
         )
 
+    @property
+    def band(self) -> DtvBand | None:
+        return dtv_band(self.rf_channel, self.center_frequency_mhz)
+
+    @property
+    def tower_key(self) -> str:
+        if self.asrn:
+            return f"asrn:{self.asrn}"
+        return (
+            f"geo:{self.site_name.lower()}:"
+            f"{self.latitude_deg:.5f}:{self.longitude_deg:.5f}:{self.altitude_m:.1f}"
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class BistaticMeasurement:
@@ -60,7 +84,9 @@ class BistaticMeasurement:
     bearing_to_emitter_deg: float
 
 
-def load_dtv_emitters(path: str | Path | None) -> list[DtvEmitter]:
+def load_dtv_emitters(
+    path: str | Path | None, bands: set[DtvBand] | None = None
+) -> list[DtvEmitter]:
     """Load DTV emitter rows from the FCC-derived CSV export."""
 
     if path is None:
@@ -73,20 +99,23 @@ def load_dtv_emitters(path: str | Path | None) -> list[DtvEmitter]:
     with csv_path.open(newline="", encoding="utf-8-sig") as handle:
         for row in csv.DictReader(handle):
             try:
-                emitters.append(
-                    DtvEmitter(
-                        call_sign=row.get("call_sign", "").strip(),
-                        site_name=row.get("site_name", "").strip(),
-                        rf_channel=int(row.get("rf_channel", "0") or "0"),
-                        center_frequency_mhz=float(row["center_frequency_mhz"]),
-                        latitude_deg=float(row["tx_latitude_deg"]),
-                        longitude_deg=float(row["tx_longitude_deg"]),
-                        altitude_m=float(row["tx_altitude_m"]),
-                        eirp_kw=float(row["eirp_kw"]),
-                    )
+                emitter = DtvEmitter(
+                    facility_id=row.get("facility_id", "").strip(),
+                    call_sign=row.get("call_sign", "").strip(),
+                    site_name=row.get("site_name", "").strip(),
+                    asrn=row.get("asrn", "").strip(),
+                    rf_channel=int(row.get("rf_channel", "0") or "0"),
+                    center_frequency_mhz=float(row["center_frequency_mhz"]),
+                    latitude_deg=float(row["tx_latitude_deg"]),
+                    longitude_deg=float(row["tx_longitude_deg"]),
+                    altitude_m=float(row["tx_altitude_m"]),
+                    eirp_kw=float(row["eirp_kw"]),
                 )
             except (KeyError, TypeError, ValueError):
                 continue
+            if bands is not None and emitter.band not in bands:
+                continue
+            emitters.append(emitter)
     return emitters
 
 
@@ -101,21 +130,62 @@ def top_bistatic_measurements(
 ) -> list[BistaticMeasurement]:
     """Return the strongest passive bistatic emitter geometries by SNR."""
 
-    measurements = [
-        measurement
-        for emitter in emitters
-        if (
-            measurement := bistatic_measurement(
-                emitter=emitter,
-                receiver=receiver,
-                position=position,
-                velocity=velocity,
-                rcs_dbsm=rcs_dbsm,
-            )
+    measurements: list[BistaticMeasurement] = []
+    for emitter in emitters:
+        measurement = bistatic_measurement(
+            emitter=emitter,
+            receiver=receiver,
+            position=position,
+            velocity=velocity,
+            rcs_dbsm=rcs_dbsm,
         )
-        is not None
-    ]
-    return sorted(measurements, key=lambda item: item.snr_db, reverse=True)[:count]
+        if measurement is not None:
+            measurements.append(measurement)
+    measurements = sorted(measurements, key=lambda item: item.snr_db, reverse=True)
+    diverse_measurements: list[BistaticMeasurement] = []
+    used_towers: set[str] = set()
+    for measurement in measurements:
+        tower_key = measurement.emitter.tower_key
+        if tower_key in used_towers:
+            continue
+        diverse_measurements.append(measurement)
+        used_towers.add(tower_key)
+        if len(diverse_measurements) >= count:
+            break
+    return diverse_measurements
+
+
+def parse_dtv_bands(value: str) -> set[DtvBand]:
+    """Parse a comma-separated DTV band option."""
+
+    bands: set[DtvBand] = set()
+    for raw_part in value.split(","):
+        part = raw_part.strip().lower()
+        if not part:
+            continue
+        if part == "all":
+            return {DtvBand.LOW_VHF, DtvBand.HIGH_VHF, DtvBand.UHF}
+        if part in {"low", "low_vhf", "low-vhf", "vhf-low"}:
+            bands.add(DtvBand.LOW_VHF)
+        elif part in {"high", "high_vhf", "high-vhf", "vhf-high"}:
+            bands.add(DtvBand.HIGH_VHF)
+        elif part == "uhf":
+            bands.add(DtvBand.UHF)
+        else:
+            raise ValueError(f"Unsupported DTV band {raw_part!r}")
+    return bands or {DtvBand.UHF}
+
+
+def dtv_band(rf_channel: int, center_frequency_mhz: float) -> DtvBand | None:
+    """Return the DTV band for an RF channel/frequency pair."""
+
+    if 2 <= rf_channel <= 6 or 54.0 <= center_frequency_mhz <= 88.0:
+        return DtvBand.LOW_VHF
+    if 7 <= rf_channel <= 13 or 174.0 <= center_frequency_mhz <= 216.0:
+        return DtvBand.HIGH_VHF
+    if 14 <= rf_channel <= 36 or 470.0 <= center_frequency_mhz <= 608.0:
+        return DtvBand.UHF
+    return None
 
 
 def bistatic_measurement(

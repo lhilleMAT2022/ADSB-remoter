@@ -180,8 +180,10 @@ def test_track_focus_status_reports_aged_and_dropped() -> None:
 
 def test_track_focus_row_formats_cpa_values() -> None:
     emitter = DtvEmitter(
+        facility_id="1",
         call_sign="WBZ-TV",
         site_name="CBS Tower",
+        asrn="100",
         rf_channel=20,
         center_frequency_mhz=509.0,
         latitude_deg=42.0,
@@ -216,7 +218,7 @@ def test_track_focus_row_formats_cpa_values() -> None:
         "2.0",
         "90.0",
         "-5.0",
-        "WBZ-TV @123°: 509MHz 12dB 34km -68Hz",
+        "WBZ-TV @123°: 12dB 34km -68Hz",
         "",
         "",
         "",
@@ -228,8 +230,10 @@ def test_main_display_bistatic_only_computes_closest_track_limit() -> None:
     now = datetime.now()
     receiver = _observer("receiver")
     emitter = DtvEmitter(
+        facility_id="1",
         call_sign="WBZ-TV",
         site_name="CBS Tower",
+        asrn="100",
         rf_channel=20,
         center_frequency_mhz=509.0,
         latitude_deg=0.02,
