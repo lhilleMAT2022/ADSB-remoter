@@ -57,6 +57,7 @@ uv run --no-dev adsb-console --source 192.168.10.131:30003 --max-display-range-k
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --show-aged-tracks
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --carrier-frequency-mhz 600
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --track-retention-minutes 20
+uv run --no-dev adsb-console --source 192.168.10.131:30003 --dtv-file 20_DTV_direct_path_input.csv
 ```
 
 For development on that machine, run `uv sync --group dev` and omit `--no-dev` when running tools that need the dev dependencies.
@@ -87,7 +88,11 @@ adsb-console --source 127.0.0.1:28887 --observerfile .\tests\fixtures\observers.
 
 Without an observer file, the default local observer is the MathWorks Apple Hill parking lot, and the default remote observer is the CBS Broadcast Tower.
 
-The TUI redraws the table at a bounded screen refresh rate instead of rebuilding it for every incoming SBS message. Use `--refresh-rate 0.5` or similar to tune the display cadence. The display includes line-of-sight range rate in meters per second and one-way Doppler shift in Hz. Doppler uses `--carrier-frequency-mhz`, which defaults to 600 MHz. Display controls:
+The TUI redraws the table at a bounded screen refresh rate instead of rebuilding it for every incoming SBS message. Use `--refresh-rate 0.5` or similar to tune the display cadence. The display includes line-of-sight range rate in meters per second and one-way Doppler shift in Hz. Doppler uses `--carrier-frequency-mhz`, which defaults to 600 MHz.
+
+The main observer table also includes passive bistatic estimates from DTV towers in `20_DTV_direct_path_input.csv`. For the closest 10 displayed tracks to the selected observer, the `Best BiSNR`, `2nd BiSNR`, and `3rd BiSNR` columns show the strongest DTV opportunities as `site: MHz SNRdB range-km doppler-Hz`. Use `--bistatic-display-tracks` to change the closest-track limit. Track-focus mode shows the top five DTV opportunities for each observer and includes the DTV facility call sign plus bearing from that observer to the tower.
+
+Display controls:
 
 - `o`: cycle observers
 - `a`: toggle all tracks versus filtered display

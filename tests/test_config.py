@@ -61,6 +61,9 @@ def test_default_observers_are_deployment_observers() -> None:
     assert observers[0].latitude_deg == 42.299350798761694
     assert observers[0].longitude_deg == -71.34948267330608
     assert observers[0].altitude_m == 75.0
+    assert observers[0].receiver_gain_dbi == 30.0
+    assert observers[0].noise_figure_db == 3.0
+    assert observers[0].bandwidth_mhz == 8.0
     assert observers[1].name == "CBS Broadcast Tower"
     assert observers[1].role is ObserverRole.REMOTE
     assert observers[1].latitude_deg == 42.308259720042415

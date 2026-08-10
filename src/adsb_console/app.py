@@ -16,6 +16,12 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
 
+from adsb_console.bistatic import (
+    BistaticMeasurement,
+    DtvEmitter,
+    load_dtv_emitters,
+    top_bistatic_measurements,
+)
 from adsb_console.config import load_observers_or_default, parse_endpoint
 from adsb_console.models import ObserverConfig, TrackState, utc_now
 from adsb_console.tracker import (
@@ -32,6 +38,8 @@ DEFAULT_AGE_OUT_SECONDS = 20.0
 DEFAULT_CARRIER_FREQUENCY_MHZ = 600.0
 DEFAULT_LOG_MAX_LINES = 1_000
 DEFAULT_TRACK_RETENTION_MINUTES = DEFAULT_STALE_TRACK_SECONDS / 60.0
+DEFAULT_DTV_FILE = Path("20_DTV_direct_path_input.csv")
+DEFAULT_BISTATIC_DISPLAY_TRACKS = 10
 OBSERVER_TABLE = "observer"
 TRACK_FOCUS_TABLE = "track-focus"
 SORT_COLUMNS = (
@@ -44,6 +52,9 @@ SORT_COLUMNS = (
     "El deg",
     "RR m/s",
     "Dop Hz",
+    "Best BiSNR",
+    "2nd BiSNR",
+    "3rd BiSNR",
     "GS kt",
     "Age s",
 )
@@ -56,6 +67,11 @@ TRACK_FOCUS_COLUMNS = (
     "CPA km",
     "CPA Brg",
     "CPA s",
+    "BiSNR 1",
+    "BiSNR 2",
+    "BiSNR 3",
+    "BiSNR 4",
+    "BiSNR 5",
 )
 SORT_DIRECTIONS: Mapping[str, bool] = {
     "ICAO": False,
@@ -67,6 +83,9 @@ SORT_DIRECTIONS: Mapping[str, bool] = {
     "El deg": True,
     "RR m/s": False,
     "Dop Hz": False,
+    "Best BiSNR": False,
+    "2nd BiSNR": False,
+    "3rd BiSNR": False,
     "GS kt": True,
     "Age s": False,
 }
@@ -131,6 +150,8 @@ class ADSBConsoleApp(App[None]):
         age_out_seconds: float = DEFAULT_AGE_OUT_SECONDS,
         carrier_frequency_mhz: float = DEFAULT_CARRIER_FREQUENCY_MHZ,
         track_retention_minutes: float = DEFAULT_TRACK_RETENTION_MINUTES,
+        dtv_file: Path | None = DEFAULT_DTV_FILE,
+        bistatic_display_tracks: int = DEFAULT_BISTATIC_DISPLAY_TRACKS,
     ) -> None:
         super().__init__()
         self.source = source
@@ -147,6 +168,8 @@ class ADSBConsoleApp(App[None]):
         self.hide_aged_tracks = hide_aged_tracks
         self.age_out_seconds = age_out_seconds
         self.carrier_frequency_hz = carrier_frequency_mhz * 1_000_000.0
+        self.dtv_emitters = load_dtv_emitters(dtv_file)
+        self.bistatic_display_tracks = max(bistatic_display_tracks, 0)
         self.icao_filter_text = icao_filter
         self.icao_filter = _compile_icao_filter(icao_filter)
         self.sort_column_index = SORT_COLUMNS.index(DEFAULT_SORT_COLUMN)
@@ -191,6 +214,7 @@ class ADSBConsoleApp(App[None]):
         self.table.cursor_type = "row"
         self._ensure_table_layout(OBSERVER_TABLE)
         self._write_log(f"Loaded {len(self.observers)} observer(s)")
+        self._write_log(f"Loaded {len(self.dtv_emitters)} DTV emitter(s)")
         self.run_worker(self._monitor_source(), name="source-monitor", exclusive=True)
 
     async def _monitor_source(self) -> None:
@@ -253,9 +277,24 @@ class ADSBConsoleApp(App[None]):
             hide_aged_tracks=self.hide_aged_tracks,
             age_out_seconds=self.age_out_seconds,
         )
+        bistatic_by_icao = main_display_bistatic_by_icao(
+            filter_result.visible_tracks,
+            self.tracker.tracks,
+            self.selected_observer,
+            self.dtv_emitters,
+            track_limit=self.bistatic_display_tracks,
+        )
         for observed_track in filter_result.visible_tracks:
             track = self.tracker.tracks[observed_track.icao]
-            self.table.add_row(*_track_row(observed_track, track, now), key=observed_track.icao)
+            self.table.add_row(
+                *_track_row(
+                    observed_track,
+                    track,
+                    now,
+                    bistatic_by_icao.get(observed_track.icao, ()),
+                ),
+                key=observed_track.icao,
+            )
         return filter_result
 
     def _refresh_track_focus_table(self) -> None:
@@ -271,7 +310,22 @@ class ADSBConsoleApp(App[None]):
         self.track_focus_snapshot = snapshot
         self._update_track_detail(_track_focus_detail(snapshot, now, self.age_out_seconds))
         for observed_track in snapshot.observed_tracks:
-            self.table.add_row(*track_focus_row(observed_track), key=observed_track.observer_name)
+            track = snapshot.track
+            measurements = (
+                []
+                if track.last_position is None
+                else top_bistatic_measurements(
+                    emitters=self.dtv_emitters,
+                    receiver=_observer_by_name(self.observers, observed_track.observer_name),
+                    position=track.last_position,
+                    velocity=track.last_velocity,
+                    count=5,
+                )
+            )
+            self.table.add_row(
+                *track_focus_row(observed_track, measurements),
+                key=observed_track.observer_name,
+            )
 
     def _track_focus_snapshot(self, now: datetime) -> TrackFocusSnapshot | None:
         if self.selected_track_icao is None:
@@ -504,6 +558,18 @@ def main() -> None:
         type=float,
         help="Purge tracks with no reports after this many minutes; <=0 disables purge.",
     )
+    parser.add_argument(
+        "--dtv-file",
+        default=DEFAULT_DTV_FILE,
+        type=Path,
+        help="CSV file of DTV emitters used for passive bistatic SNR estimates.",
+    )
+    parser.add_argument(
+        "--bistatic-display-tracks",
+        default=DEFAULT_BISTATIC_DISPLAY_TRACKS,
+        type=int,
+        help="Compute main-table DTV bistatic columns for this many closest tracks.",
+    )
     args = parser.parse_args()
 
     ADSBConsoleApp(
@@ -517,12 +583,17 @@ def main() -> None:
         age_out_seconds=args.age_out_seconds,
         carrier_frequency_mhz=args.carrier_frequency_mhz,
         track_retention_minutes=args.track_retention_minutes,
+        dtv_file=args.dtv_file,
+        bistatic_display_tracks=args.bistatic_display_tracks,
     ).run()
 
 
 def _track_row(
-    observed_track: ObservedTrack, track: TrackState, now: datetime
-) -> tuple[str, str, str, str, str, str, str, str, str, str, str]:
+    observed_track: ObservedTrack,
+    track: TrackState,
+    now: datetime,
+    bistatic_measurements: list[BistaticMeasurement] | tuple[BistaticMeasurement, ...],
+) -> tuple[str, str, str, str, str, str, str, str, str, str, str, str, str, str]:
     position = track.last_position
     velocity = track.last_velocity
     age_s = (now - track.last_seen).total_seconds()
@@ -537,6 +608,9 @@ def _track_row(
         f"{range_az_el.elevation_deg:.1f}",
         "" if observed_track.range_rate_mps is None else f"{observed_track.range_rate_mps:.1f}",
         "" if observed_track.doppler_hz is None else f"{observed_track.doppler_hz:.1f}",
+        _format_bistatic_summary(bistatic_measurements, 0, include_bearing=False),
+        _format_bistatic_summary(bistatic_measurements, 1, include_bearing=False),
+        _format_bistatic_summary(bistatic_measurements, 2, include_bearing=False),
         "" if velocity is None else f"{velocity.ground_speed_kt:.0f}",
         f"{age_s:.1f}",
     )
@@ -553,6 +627,39 @@ def _selected_observer_index(observers: list[ObserverConfig], selected: str | No
         if observer.is_local:
             return index
     return 0
+
+
+def _observer_by_name(observers: list[ObserverConfig], name: str) -> ObserverConfig:
+    for observer in observers:
+        if observer.name == name:
+            return observer
+    raise ValueError(f"Observer not found: {name}")
+
+
+def main_display_bistatic_by_icao(
+    visible_tracks: list[ObservedTrack],
+    track_lookup: Mapping[str, TrackState],
+    receiver: ObserverConfig,
+    emitters: list[DtvEmitter],
+    *,
+    track_limit: int,
+) -> dict[str, list[BistaticMeasurement]]:
+    if track_limit <= 0 or not emitters:
+        return {}
+    closest_tracks = sorted(visible_tracks, key=lambda item: item.range_az_el.range_m)[:track_limit]
+    results: dict[str, list[BistaticMeasurement]] = {}
+    for observed_track in closest_tracks:
+        track = track_lookup.get(observed_track.icao)
+        if track is None or track.last_position is None:
+            continue
+        results[observed_track.icao] = top_bistatic_measurements(
+            emitters=emitters,
+            receiver=receiver,
+            position=track.last_position,
+            velocity=track.last_velocity,
+            count=3,
+        )
+    return results
 
 
 @dataclass(frozen=True, slots=True)
@@ -611,7 +718,8 @@ def track_focus_status(snapshot: TrackFocusSnapshot, now: datetime, age_out_seco
 
 def track_focus_row(
     observed_track: ObservedTrack,
-) -> tuple[str, str, str, str, str, str, str, str]:
+    bistatic_measurements: list[BistaticMeasurement] | tuple[BistaticMeasurement, ...] = (),
+) -> tuple[str, str, str, str, str, str, str, str, str, str, str, str, str]:
     cpa = observed_track.cpa
     return (
         observed_track.observer_name[:10],
@@ -622,6 +730,40 @@ def track_focus_row(
         "" if cpa is None else _format_optional_float(cpa.range_m / 1000.0, precision=1),
         "" if cpa is None else _format_optional_float(cpa.bearing_deg, precision=1),
         "" if cpa is None else _format_optional_float(cpa.time_s, precision=1),
+        _format_bistatic_summary(bistatic_measurements, 0, include_bearing=True),
+        _format_bistatic_summary(bistatic_measurements, 1, include_bearing=True),
+        _format_bistatic_summary(bistatic_measurements, 2, include_bearing=True),
+        _format_bistatic_summary(bistatic_measurements, 3, include_bearing=True),
+        _format_bistatic_summary(bistatic_measurements, 4, include_bearing=True),
+    )
+
+
+def _format_bistatic_summary(
+    measurements: list[BistaticMeasurement] | tuple[BistaticMeasurement, ...],
+    index: int,
+    *,
+    include_bearing: bool,
+) -> str:
+    if index >= len(measurements):
+        return ""
+    measurement = measurements[index]
+    emitter_label = (
+        measurement.emitter.call_sign if include_bearing else measurement.emitter.site_name
+    )
+    if not emitter_label:
+        emitter_label = measurement.emitter.call_sign or measurement.emitter.site_name or "DTV"
+    bearing = f" @{measurement.bearing_to_emitter_deg:.0f}°" if include_bearing else ""
+    doppler = (
+        ""
+        if measurement.bistatic_doppler_hz is None
+        else f" {measurement.bistatic_doppler_hz:.0f}Hz"
+    )
+    return (
+        f"{emitter_label[:12]}{bearing}: "
+        f"{measurement.emitter.center_frequency_mhz:.0f}MHz "
+        f"{measurement.snr_db:.0f}dB "
+        f"{measurement.bistatic_range_km:.0f}km"
+        f"{doppler}"
     )
 
 

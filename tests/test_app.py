@@ -7,11 +7,13 @@ from adsb_console.app import (
     ADSBConsoleApp,
     TrackFocusSnapshot,
     filter_display_tracks,
+    main_display_bistatic_by_icao,
     refresh_interval_s,
     track_focus_row,
     track_focus_status,
 )
-from adsb_console.models import TrackState
+from adsb_console.bistatic import BistaticMeasurement, DtvEmitter
+from adsb_console.models import ObserverConfig, ObserverRole, PositionReport, TrackState
 from adsb_console.tracker import ObservedTrack
 from adsb_console.transforms import ClosestPointOfApproach, RangeAzEl
 
@@ -177,6 +179,16 @@ def test_track_focus_status_reports_aged_and_dropped() -> None:
 
 
 def test_track_focus_row_formats_cpa_values() -> None:
+    emitter = DtvEmitter(
+        call_sign="WBZ-TV",
+        site_name="CBS Tower",
+        rf_channel=20,
+        center_frequency_mhz=509.0,
+        latitude_deg=42.0,
+        longitude_deg=-71.0,
+        altitude_m=400.0,
+        eirp_kw=1000.0,
+    )
     observed_track = ObservedTrack(
         observer_name="LongObserverName",
         icao="FOCUS",
@@ -187,8 +199,15 @@ def test_track_focus_row_formats_cpa_values() -> None:
         cpa=ClosestPointOfApproach(range_m=2_000.0, bearing_deg=90.0, time_s=-5.0),
         reported_at=datetime.now(),
     )
+    bistatic = BistaticMeasurement(
+        emitter=emitter,
+        snr_db=12.4,
+        bistatic_range_km=34.5,
+        bistatic_doppler_hz=-67.8,
+        bearing_to_emitter_deg=123.4,
+    )
 
-    assert track_focus_row(observed_track) == (
+    assert track_focus_row(observed_track, [bistatic]) == (
         "LongObserv",
         "12.3",
         "-10.5",
@@ -197,7 +216,48 @@ def test_track_focus_row_formats_cpa_values() -> None:
         "2.0",
         "90.0",
         "-5.0",
+        "WBZ-TV @123°: 509MHz 12dB 34km -68Hz",
+        "",
+        "",
+        "",
+        "",
     )
+
+
+def test_main_display_bistatic_only_computes_closest_track_limit() -> None:
+    now = datetime.now()
+    receiver = _observer("receiver")
+    emitter = DtvEmitter(
+        call_sign="WBZ-TV",
+        site_name="CBS Tower",
+        rf_channel=20,
+        center_frequency_mhz=509.0,
+        latitude_deg=0.02,
+        longitude_deg=0.0,
+        altitude_m=100.0,
+        eirp_kw=1000.0,
+    )
+    tracks = [
+        _observed_track("FAR", 300_000.0),
+        _observed_track("NEAR", 10_000.0),
+    ]
+    track_lookup = {
+        "FAR": _track_state("FAR", now, message_count=1),
+        "NEAR": _track_state("NEAR", now, message_count=1),
+    }
+    track_lookup["FAR"].last_position = _position(0.3, 0.0, now)
+    track_lookup["NEAR"].last_position = _position(0.01, 0.0, now)
+
+    results = main_display_bistatic_by_icao(
+        tracks,
+        track_lookup,
+        receiver,
+        [emitter],
+        track_limit=1,
+    )
+
+    assert set(results) == {"NEAR"}
+    assert len(results["NEAR"]) == 1
 
 
 def _observed_track(icao: str, range_m: float) -> ObservedTrack:
@@ -219,4 +279,24 @@ def _track_state(icao: str, last_seen: datetime, message_count: int) -> TrackSta
         first_seen=last_seen,
         last_seen=last_seen,
         message_count=message_count,
+    )
+
+
+def _observer(name: str) -> ObserverConfig:
+    return ObserverConfig(
+        name=name,
+        role=ObserverRole.LOCAL,
+        latitude_deg=0.0,
+        longitude_deg=0.0,
+        altitude_m=0.0,
+        receiver_gain_dbi=30.0,
+    )
+
+
+def _position(latitude_deg: float, longitude_deg: float, reported_at: datetime) -> PositionReport:
+    return PositionReport(
+        latitude_deg=latitude_deg,
+        longitude_deg=longitude_deg,
+        altitude_ft=1000.0,
+        reported_at=reported_at,
     )

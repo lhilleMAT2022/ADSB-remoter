@@ -219,6 +219,9 @@ class ObserverConfig:
     report_rate_hz: float = 0.5
     report_method: ReportMethod = ReportMethod.NONE
     report_endpoint: str | None = None
+    receiver_gain_dbi: float = 0.0
+    noise_figure_db: float = 3.0
+    bandwidth_mhz: float = 8.0
 
     @property
     def is_local(self) -> bool:

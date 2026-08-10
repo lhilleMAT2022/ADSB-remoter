@@ -14,6 +14,9 @@ DEFAULT_LOCAL_OBSERVER = ObserverConfig(
     latitude_deg=42.299350798761694,
     longitude_deg=-71.34948267330608,
     altitude_m=75.0,
+    receiver_gain_dbi=30.0,
+    noise_figure_db=3.0,
+    bandwidth_mhz=8.0,
 )
 DEFAULT_REMOTE_OBSERVER = ObserverConfig(
     name="CBS Broadcast Tower",
@@ -71,6 +74,9 @@ def load_observers(path: str | Path) -> list[ObserverConfig]:
                 report_rate_hz=float(values.get("reportRateHz", "0.5")),
                 report_method=_report_method(values.get("reportMethod")),
                 report_endpoint=values.get("reportEndpoint"),
+                receiver_gain_dbi=_float_from(values, ("receiverGainDbi", "Gr"), 0.0),
+                noise_figure_db=_float_from(values, ("noiseFigureDb", "FdB"), 3.0),
+                bandwidth_mhz=_float_from(values, ("bandwidthMhz", "Bmhz"), 8.0),
             )
         )
     return observers
@@ -95,6 +101,9 @@ def ensure_local_observer(observers: list[ObserverConfig]) -> list[ObserverConfi
                 orientation_roll_deg=first.orientation_roll_deg,
                 min_range_m=0.0,
                 max_range_m=1_000_000.0,
+                receiver_gain_dbi=first.receiver_gain_dbi,
+                noise_figure_db=first.noise_figure_db,
+                bandwidth_mhz=first.bandwidth_mhz,
             ),
             *observers,
         ]
@@ -142,3 +151,11 @@ def _triple(value: str) -> tuple[float, float, float]:
     if len(parts) != 3:
         raise ValueError(f"Expected three comma-separated values, got {value!r}")
     return parts[0], parts[1], parts[2]
+
+
+def _float_from(values: configparser.SectionProxy, keys: tuple[str, ...], default: float) -> float:
+    for key in keys:
+        value = values.get(key)
+        if value is not None:
+            return float(value)
+    return default
