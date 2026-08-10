@@ -52,7 +52,7 @@ uv run --no-dev adsb-console --source 192.168.10.131:30003
 Useful live-display options:
 
 ```bash
-uv run --no-dev adsb-console --source 192.168.10.131:30003 --refresh-rate 0.5
+uv run --no-dev adsb-console --source 192.168.10.131:30003 --refresh-rate 0.1
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --max-display-range-km 150
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --show-aged-tracks
 uv run --no-dev adsb-console --source 192.168.10.131:30003 --carrier-frequency-mhz 600
@@ -89,9 +89,9 @@ adsb-console --source 127.0.0.1:28887 --observerfile .\tests\fixtures\observers.
 
 Without an observer file, the default local observer is the MathWorks Apple Hill parking lot, and the default remote observer is the CBS Broadcast Tower.
 
-The TUI redraws the table at a bounded screen refresh rate instead of rebuilding it for every incoming SBS message. Use `--refresh-rate 0.5` or similar to tune the display cadence. The display includes line-of-sight range rate in meters per second and one-way Doppler shift in Hz. Doppler uses `--carrier-frequency-mhz`, which defaults to 600 MHz.
+The TUI redraws the table at a bounded screen refresh rate instead of rebuilding it for every incoming SBS message. The default update interval is 10 seconds. Use `--refresh-rate 0.1` or similar to tune the startup display cadence, or press `u` in the TUI to cycle 2, 5, 10, and 30 second update intervals. The display includes line-of-sight range rate in meters per second and one-way Doppler shift in Hz. Doppler uses `--carrier-frequency-mhz`, which defaults to 600 MHz.
 
-The main observer table also includes passive bistatic estimates from DTV towers in `20_DTV_direct_path_input.csv`. By default only UHF DTV channels are included; use `--dtv-bands uhf`, `--dtv-bands low-vhf,high-vhf,uhf`, or `--dtv-bands all` to change the included bands. For the closest 10 displayed tracks to the selected observer, the `Best BiSNR`, `2nd BiSNR`, and `3rd BiSNR` columns show the strongest geographically distinct DTV tower opportunities as `call: SNRdB range-km doppler-Hz`. Use `--bistatic-display-tracks` to change the closest-track limit. Track-focus mode shows the top five geographically distinct DTV tower opportunities for each observer and includes the DTV facility call sign plus bearing from that observer to the tower. The right-side status log writes a compact table with call sign, site name, frequency, and bearing whenever a new tower appears for the current observer/focus context.
+The main observer table also includes passive bistatic estimates from DTV towers in `20_DTV_direct_path_input.csv`. By default only UHF DTV channels are included; use `--dtv-bands uhf`, `--dtv-bands low-vhf,high-vhf,uhf`, or `--dtv-bands all` to change the included bands. For the closest 10 displayed tracks to the selected observer, the `Best BiSNR`, `2nd BiSNR`, and `3rd BiSNR` columns show the strongest geographically distinct DTV tower opportunities as `call: SNRdB range-km doppler-Hz`. Use `--bistatic-display-tracks` to change the closest-track limit. Track-focus mode shows the top five geographically distinct DTV tower opportunities for each observer using the same compact `call: SNRdB range-km doppler-Hz` cell format. The right-side status log writes a compact table with call sign, site name, frequency, and bearing whenever a new tower appears for the current observer/focus context.
 
 Display controls:
 
@@ -103,6 +103,7 @@ Display controls:
 - `Enter`: focus the selected track
 - `Esc`: return from track focus to observer focus
 - `s`: cycle the active sort column
+- `u`: cycle screen update interval through 2, 5, 10, and 30 seconds
 
 In track focus, the top detail area shows the selected track's ICAO, callsign, message count, last LLA, ground speed, and age. The table below shows every observer's range, range rate, azimuth, Doppler, CPA range, CPA bearing, and time to CPA for that selected track. If the focused track ages out or is purged, the screen keeps the last values and marks the track as aged-out or dropped.
 
@@ -134,3 +135,4 @@ If the editable package has not been installed into `.venv`, use the checked-in 
 .\scripts\adsb-playback.ps1 .\tests\fixtures\sbs_clean\10_adsb_20220413_060850.csv.gz --bind 127.0.0.1:28887
 .\scripts\adsb-console.ps1 -Source 127.0.0.1:28887
 ```
+

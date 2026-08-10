@@ -9,6 +9,7 @@ from adsb_console.app import (
     bistatic_tower_log_table,
     filter_display_tracks,
     main_display_bistatic_by_icao,
+    next_refresh_interval_s,
     refresh_interval_s,
     track_focus_row,
     track_focus_status,
@@ -26,6 +27,7 @@ def test_app_constructs_without_textual_attribute_collisions() -> None:
     assert app.event_log is None
     assert app.tracker.message_count == 0
     assert app.selected_observer.is_local
+    assert app.refresh_interval_s == 10.0
     assert app.tracker.stale_track_seconds == 20.0 * 60.0
     assert len(app.observers) == 2
     assert app.observers[0].name == "MathWorks Apple Hill Parking Lot"
@@ -55,6 +57,14 @@ def test_filter_display_tracks_counts_hidden_by_range_regex_and_row_limit() -> N
 def test_refresh_interval_from_rate() -> None:
     assert refresh_interval_s(0.5) == 2.0
     assert refresh_interval_s(0.0) == 0.0
+    assert refresh_interval_s(0.1) == 10.0
+
+
+def test_next_refresh_interval_cycles_choices() -> None:
+    assert next_refresh_interval_s(2.0) == 5.0
+    assert next_refresh_interval_s(5.0) == 10.0
+    assert next_refresh_interval_s(10.0) == 30.0
+    assert next_refresh_interval_s(30.0) == 2.0
 
 
 def test_filter_display_tracks_sorts_by_range_before_row_limit() -> None:
@@ -219,7 +229,7 @@ def test_track_focus_row_formats_cpa_values() -> None:
         "2.0",
         "90.0",
         "-5.0",
-        "WBZ-TV @123°: 12dB 34km -68Hz",
+        "WBZ-TV: 12dB 34km -68Hz",
         "",
         "",
         "",

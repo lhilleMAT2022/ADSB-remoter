@@ -31,7 +31,9 @@ from adsb_console.tracker import (
     ObservedTrack,
 )
 
-DEFAULT_SCREEN_REFRESH_HZ = 0.5
+DEFAULT_SCREEN_REFRESH_SECONDS = 10.0
+DEFAULT_SCREEN_REFRESH_HZ = 1.0 / DEFAULT_SCREEN_REFRESH_SECONDS
+SCREEN_REFRESH_SECONDS_CHOICES = (2.0, 5.0, 10.0, 30.0)
 DEFAULT_MAX_DISPLAY_RANGE_KM = 200.0
 DISPLAY_RANGE_STEP_KM = 25.0
 DEFAULT_MAX_FILTERED_ROWS = 200
@@ -136,6 +138,7 @@ class ADSBConsoleApp(App[None]):
         ("o", "next_observer", "Next observer"),
         ("q", "quit", "Quit"),
         ("s", "next_sort_column", "Sort column"),
+        ("u", "next_update_rate", "Update rate"),
         ("escape", "observer_focus", "Observer focus"),
     ]
 
@@ -462,6 +465,11 @@ class ADSBConsoleApp(App[None]):
         self._write_log(f"Sort column: {self.sort_label}")
         self._update_summary(self._summary_text())
 
+    def action_next_update_rate(self) -> None:
+        self.refresh_interval_s = next_refresh_interval_s(self.refresh_interval_s)
+        self._write_log(f"Screen update interval: {self.refresh_interval_s:.0f}s")
+        self._update_summary(self._summary_text())
+
     def action_toggle_aged_tracks(self) -> None:
         self.hide_aged_tracks = not self.hide_aged_tracks
         self.last_filter_result = self._refresh_table()
@@ -538,6 +546,7 @@ class ADSBConsoleApp(App[None]):
             f"Range: {display_mode} | "
             f"ICAO: {filter_text} | "
             f"Aged: {aged_text} | "
+            f"Update: {self.refresh_interval_s:.0f}s | "
             f"Sort: {self.sort_label} | "
             f"Last: {self.last_track_icao or '-'}"
         )
@@ -559,6 +568,7 @@ class ADSBConsoleApp(App[None]):
             f"Focus: Track {selected} | "
             f"Status: {track_status} | "
             f"Observers: {observer_count} | "
+            f"Update: {self.refresh_interval_s:.0f}s | "
             f"Esc: observer focus"
         )
 
@@ -769,11 +779,11 @@ def track_focus_row(
         "" if cpa is None else _format_optional_float(cpa.range_m / 1000.0, precision=1),
         "" if cpa is None else _format_optional_float(cpa.bearing_deg, precision=1),
         "" if cpa is None else _format_optional_float(cpa.time_s, precision=1),
-        _format_bistatic_summary(bistatic_measurements, 0, include_bearing=True),
-        _format_bistatic_summary(bistatic_measurements, 1, include_bearing=True),
-        _format_bistatic_summary(bistatic_measurements, 2, include_bearing=True),
-        _format_bistatic_summary(bistatic_measurements, 3, include_bearing=True),
-        _format_bistatic_summary(bistatic_measurements, 4, include_bearing=True),
+        _format_bistatic_summary(bistatic_measurements, 0, include_bearing=False),
+        _format_bistatic_summary(bistatic_measurements, 1, include_bearing=False),
+        _format_bistatic_summary(bistatic_measurements, 2, include_bearing=False),
+        _format_bistatic_summary(bistatic_measurements, 3, include_bearing=False),
+        _format_bistatic_summary(bistatic_measurements, 4, include_bearing=False),
     )
 
 
@@ -1012,6 +1022,13 @@ def refresh_interval_s(refresh_rate_hz: float) -> float:
     if refresh_rate_hz <= 0.0:
         return 0.0
     return 1.0 / refresh_rate_hz
+
+
+def next_refresh_interval_s(current_interval_s: float) -> float:
+    for interval_s in SCREEN_REFRESH_SECONDS_CHOICES:
+        if current_interval_s < interval_s:
+            return interval_s
+    return SCREEN_REFRESH_SECONDS_CHOICES[0]
 
 
 if __name__ == "__main__":
