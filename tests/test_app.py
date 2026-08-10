@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from adsb_console.app import (
     ADSBConsoleApp,
     TrackFocusSnapshot,
+    bistatic_tower_log_table,
     filter_display_tracks,
     main_display_bistatic_by_icao,
     refresh_interval_s,
@@ -224,6 +225,37 @@ def test_track_focus_row_formats_cpa_values() -> None:
         "",
         "",
     )
+
+
+def test_bistatic_tower_log_uses_pretty_table_format() -> None:
+    receiver = _observer("MathWorks Apple Hill Parking Lot")
+    emitter = DtvEmitter(
+        facility_id="1",
+        call_sign="WBZ-TV",
+        site_name="CBS Tower",
+        asrn="100",
+        rf_channel=20,
+        center_frequency_mhz=509.0,
+        latitude_deg=42.0,
+        longitude_deg=-71.0,
+        altitude_m=400.0,
+        eirp_kw=1000.0,
+    )
+    measurement = BistaticMeasurement(
+        emitter=emitter,
+        snr_db=12.4,
+        bistatic_range_km=34.5,
+        bistatic_doppler_hz=-67.8,
+        bearing_to_emitter_deg=123.4,
+    )
+
+    table = bistatic_tower_log_table(receiver, [measurement])
+
+    assert "DTV towers" in table
+    assert "+------------+--------+-----------+-----+-----+" in table
+    assert "| Observer   | Call   | Site      | MHz | Brg |" in table
+    assert "| MathWorks  | WBZ-TV | CBS Tower | 509 | 123 |" in table
+    assert "Call:" not in table
 
 
 def test_main_display_bistatic_only_computes_closest_track_limit() -> None:

@@ -399,12 +399,15 @@ class ADSBConsoleApp(App[None]):
     def _log_bistatic_towers(
         self, receiver: ObserverConfig, measurements: list[BistaticMeasurement]
     ) -> None:
+        new_measurements: list[BistaticMeasurement] = []
         for measurement in measurements:
             key = (self.screen_focus, receiver.name, measurement.emitter.tower_key)
             if key in self.reported_bistatic_towers:
                 continue
             self.reported_bistatic_towers.add(key)
-            self._write_log(_bistatic_tower_log_line(receiver, measurement))
+            new_measurements.append(measurement)
+        if new_measurements:
+            self._write_log(bistatic_tower_log_table(receiver, new_measurements))
 
     def _update_summary(self, message: str) -> None:
         if self.summary is not None:
@@ -798,15 +801,38 @@ def _format_bistatic_summary(
     )
 
 
-def _bistatic_tower_log_line(receiver: ObserverConfig, measurement: BistaticMeasurement) -> str:
-    return (
-        "DTV tower | "
-        f"Obs: {receiver.name[:10]} | "
-        f"Call: {measurement.emitter.call_sign or '-'} | "
-        f"Site: {(measurement.emitter.site_name or '-')[:24]} | "
-        f"Freq: {measurement.emitter.center_frequency_mhz:.0f} MHz | "
-        f"Bearing: {measurement.bearing_to_emitter_deg:.0f} deg"
+def bistatic_tower_log_table(
+    receiver: ObserverConfig, measurements: list[BistaticMeasurement]
+) -> str:
+    rows = [
+        (
+            receiver.name[:10],
+            measurement.emitter.call_sign or "-",
+            (measurement.emitter.site_name or "-")[:24],
+            f"{measurement.emitter.center_frequency_mhz:.0f}",
+            f"{measurement.bearing_to_emitter_deg:.0f}",
+        )
+        for measurement in measurements
+    ]
+    return "DTV towers\n" + _pretty_table(
+        ("Observer", "Call", "Site", "MHz", "Brg"),
+        rows,
     )
+
+
+def _pretty_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
+    widths = [
+        max(len(header), *(len(row[index]) for row in rows)) for index, header in enumerate(headers)
+    ]
+    border = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
+    header_row = _pretty_table_row(headers, widths)
+    body_rows = [_pretty_table_row(row, widths) for row in rows]
+    return "\n".join([border, header_row, border, *body_rows, border])
+
+
+def _pretty_table_row(values: tuple[str, ...], widths: list[int]) -> str:
+    cells = [f" {value:<{width}} " for value, width in zip(values, widths, strict=True)]
+    return "|" + "|".join(cells) + "|"
 
 
 def _format_optional_float(value: float | None, *, precision: int) -> str:
