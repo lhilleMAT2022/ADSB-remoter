@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from adsb_console.app import (
     ADSBConsoleApp,
     TrackFocusSnapshot,
+    bisnr_breakdown_table,
     bistatic_tower_log_table,
     filter_display_tracks,
     main_display_bistatic_by_icao,
@@ -14,7 +15,12 @@ from adsb_console.app import (
     track_focus_row,
     track_focus_status,
 )
-from adsb_console.bistatic import BistaticMeasurement, DtvEmitter
+from adsb_console.bistatic import (
+    BistaticMeasurement,
+    BistaticSnrBreakdown,
+    DtvEmitter,
+    top_bistatic_measurements,
+)
 from adsb_console.models import ObserverConfig, ObserverRole, PositionReport, TrackState
 from adsb_console.tracker import ObservedTrack
 from adsb_console.transforms import ClosestPointOfApproach, RangeAzEl
@@ -215,6 +221,7 @@ def test_track_focus_row_formats_cpa_values() -> None:
     bistatic = BistaticMeasurement(
         emitter=emitter,
         snr_db=12.4,
+        snr_breakdown=_breakdown(12.4),
         bistatic_range_km=34.5,
         bistatic_doppler_hz=-67.8,
         bearing_to_emitter_deg=123.4,
@@ -254,6 +261,7 @@ def test_bistatic_tower_log_uses_pretty_table_format() -> None:
     measurement = BistaticMeasurement(
         emitter=emitter,
         snr_db=12.4,
+        snr_breakdown=_breakdown(12.4),
         bistatic_range_km=34.5,
         bistatic_doppler_hz=-67.8,
         bearing_to_emitter_deg=123.4,
@@ -266,6 +274,57 @@ def test_bistatic_tower_log_uses_pretty_table_format() -> None:
     assert "| Observer   | Call   | Site      | MHz | Brg |" in table
     assert "| MathWorks  | WBZ-TV | CBS Tower | 509 | 123 |" in table
     assert "Call:" not in table
+
+
+def test_bisnr_breakdown_table_has_one_row_per_observer() -> None:
+    now = datetime.now()
+    emitter = DtvEmitter(
+        facility_id="1",
+        call_sign="WBZ-TV",
+        site_name="CBS Tower",
+        asrn="100",
+        rf_channel=20,
+        center_frequency_mhz=509.0,
+        latitude_deg=0.0,
+        longitude_deg=0.02,
+        altitude_m=100.0,
+        eirp_kw=1000.0,
+    )
+    observer_a = _observer("Alpha")
+    observer_b = ObserverConfig(
+        name="Bravo",
+        role=ObserverRole.REMOTE,
+        latitude_deg=0.0,
+        longitude_deg=0.0,
+        altitude_m=0.0,
+        receiver_gain_dbi=6.0,
+    )
+    position = _position(0.0, 0.01, now)
+
+    table_text = bisnr_breakdown_table([observer_a, observer_b], [emitter], position, None)
+
+    assert "Alpha" in table_text
+    assert "Bravo" in table_text
+    assert "SNR" in table_text
+
+    # Cross-check against the same computation the main table uses, so the
+    # breakdown table can't silently drift from the numbers it explains.
+    expected = top_bistatic_measurements(
+        emitters=[emitter],
+        receiver=observer_b,
+        position=position,
+        velocity=None,
+        count=1,
+    )[0]
+    assert f"{expected.snr_db:.1f}" in table_text
+
+
+def test_bisnr_breakdown_table_handles_observer_with_no_emitters() -> None:
+    position = _position(0.0, 0.0, datetime.now())
+
+    table_text = bisnr_breakdown_table([_observer("Alpha")], [], position, None)
+
+    assert "Alpha" in table_text
 
 
 def test_main_display_bistatic_only_computes_closest_track_limit() -> None:
@@ -335,7 +394,7 @@ def _observer(name: str) -> ObserverConfig:
         latitude_deg=0.0,
         longitude_deg=0.0,
         altitude_m=0.0,
-        receiver_gain_dbi=30.0,
+        receiver_gain_dbi=10.0,
     )
 
 
@@ -345,4 +404,21 @@ def _position(latitude_deg: float, longitude_deg: float, reported_at: datetime) 
         longitude_deg=longitude_deg,
         altitude_ft=1000.0,
         reported_at=reported_at,
+    )
+
+
+def _breakdown(snr_db: float) -> BistaticSnrBreakdown:
+    """Stand-in breakdown for tests that only care about the total SNR."""
+    return BistaticSnrBreakdown(
+        eirp_dbw=0.0,
+        receiver_gain_dbi=0.0,
+        wavelength_gain_db=0.0,
+        rcs_dbsm=0.0,
+        spreading_loss_db=0.0,
+        tx_range_loss_db=0.0,
+        rx_range_loss_db=0.0,
+        noise_floor_db=0.0,
+        polarization_loss_db=0.0,
+        system_loss_db=0.0,
+        snr_db=snr_db,
     )

@@ -7,6 +7,7 @@ from adsb_console.bistatic import (
     DtvBand,
     DtvEmitter,
     bistatic_measurement,
+    bistatic_snr_breakdown,
     load_dtv_emitters,
     parse_dtv_bands,
     top_bistatic_measurements,
@@ -49,7 +50,7 @@ def test_bistatic_measurement_has_snr_range_doppler_and_bearing() -> None:
         latitude_deg=0.0,
         longitude_deg=0.0,
         altitude_m=0.0,
-        receiver_gain_dbi=30.0,
+        receiver_gain_dbi=10.0,
         noise_figure_db=3.0,
         bandwidth_mhz=8.0,
     )
@@ -75,7 +76,12 @@ def test_bistatic_measurement_has_snr_range_doppler_and_bearing() -> None:
 
     assert measurement is not None
     assert isclose(measurement.bistatic_range_km, 4.1, rel_tol=0.1)
-    assert measurement.snr_db > 0.0
+    # Pinned to a realistic receive antenna (10 dBi Yagi, not a tracking
+    # dish) plus polarization/system loss; guards against a regression back
+    # toward the old implausibly-high defaults.
+    assert isclose(measurement.snr_db, 31.18, abs_tol=0.1)
+    assert 0.0 < measurement.snr_db < 40.0
+    assert measurement.snr_breakdown.snr_db == measurement.snr_db
     assert measurement.bistatic_doppler_hz is not None
     assert isclose(measurement.bearing_to_emitter_deg, 90.0, abs_tol=0.1)
 
@@ -88,7 +94,7 @@ def test_top_bistatic_measurements_sorts_by_snr() -> None:
         latitude_deg=0.0,
         longitude_deg=0.0,
         altitude_m=0.0,
-        receiver_gain_dbi=30.0,
+        receiver_gain_dbi=10.0,
     )
     position = PositionReport(
         latitude_deg=0.0,
@@ -140,7 +146,7 @@ def test_top_bistatic_measurements_keeps_one_emitter_per_tower() -> None:
         latitude_deg=0.0,
         longitude_deg=0.0,
         altitude_m=0.0,
-        receiver_gain_dbi=30.0,
+        receiver_gain_dbi=10.0,
     )
     position = PositionReport(
         latitude_deg=0.0,
@@ -182,3 +188,35 @@ def test_top_bistatic_measurements_keeps_one_emitter_per_tower() -> None:
     )
 
     assert len(results) == 1
+
+
+def test_bistatic_snr_breakdown_terms_sum_to_total() -> None:
+    breakdown = bistatic_snr_breakdown(
+        eirp_kw=1000.0,
+        receiver_gain_dbi=10.0,
+        receiver_noise_figure_db=3.0,
+        receiver_bandwidth_mhz=8.0,
+        wavelength_m=0.58898,
+        rcs_dbsm=10.0,
+        transmitter_target_range_m=3151.27,
+        target_receiver_range_m=3245.01,
+    )
+
+    term_sum = (
+        breakdown.eirp_dbw
+        + breakdown.receiver_gain_dbi
+        + breakdown.wavelength_gain_db
+        + breakdown.rcs_dbsm
+        + breakdown.spreading_loss_db
+        + breakdown.tx_range_loss_db
+        + breakdown.rx_range_loss_db
+        + breakdown.noise_floor_db
+        + breakdown.polarization_loss_db
+        + breakdown.system_loss_db
+    )
+
+    assert isclose(term_sum, breakdown.snr_db, abs_tol=1e-9)
+    # Loss terms must be reported as negative contributions, not bare
+    # magnitudes, so a table of terms can be summed directly.
+    assert breakdown.polarization_loss_db < 0.0
+    assert breakdown.system_loss_db < 0.0

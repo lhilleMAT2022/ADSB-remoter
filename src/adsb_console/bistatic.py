@@ -24,6 +24,14 @@ from adsb_console.transforms import (
 BOLTZMANN_J_PER_K = 1.380_649e-23
 STANDARD_NOISE_TEMPERATURE_K = 290.0
 DEFAULT_RCS_DBSM = 10.0
+# Residual bistatic depolarization loss for a horizontally-polarized receive
+# Yagi against horizontally-polarized ATSC DTV broadcast (roughly matched,
+# small penalty from multipath/aircraft-skin scattering depolarization).
+DEFAULT_POLARIZATION_LOSS_DB = 1.0
+# Connector/insertion and implementation loss downstream of the receive
+# antenna. Feedline loss is not separately budgeted here because a
+# mast-mounted powered preamp overcomes it ahead of the run to the receiver.
+DEFAULT_SYSTEM_LOSS_DB = 2.0
 
 
 class DtvBand(StrEnum):
@@ -74,11 +82,33 @@ class DtvEmitter:
 
 
 @dataclass(frozen=True, slots=True)
+class BistaticSnrBreakdown:
+    """Bistatic radar equation SNR, itemized by term, all in dB.
+
+    Every field except `snr_db` is a signed contribution; summing them
+    reproduces `snr_db`.
+    """
+
+    eirp_dbw: float
+    receiver_gain_dbi: float
+    wavelength_gain_db: float
+    rcs_dbsm: float
+    spreading_loss_db: float
+    tx_range_loss_db: float
+    rx_range_loss_db: float
+    noise_floor_db: float
+    polarization_loss_db: float
+    system_loss_db: float
+    snr_db: float
+
+
+@dataclass(frozen=True, slots=True)
 class BistaticMeasurement:
     """Passive bistatic result for one emitter, target, and receiver."""
 
     emitter: DtvEmitter
     snr_db: float
+    snr_breakdown: BistaticSnrBreakdown
     bistatic_range_km: float
     bistatic_doppler_hz: float | None
     bearing_to_emitter_deg: float
@@ -127,6 +157,8 @@ def top_bistatic_measurements(
     velocity: VelocityReport | None,
     count: int,
     rcs_dbsm: float = DEFAULT_RCS_DBSM,
+    polarization_loss_db: float = DEFAULT_POLARIZATION_LOSS_DB,
+    system_loss_db: float = DEFAULT_SYSTEM_LOSS_DB,
 ) -> list[BistaticMeasurement]:
     """Return the strongest passive bistatic emitter geometries by SNR."""
 
@@ -138,6 +170,8 @@ def top_bistatic_measurements(
             position=position,
             velocity=velocity,
             rcs_dbsm=rcs_dbsm,
+            polarization_loss_db=polarization_loss_db,
+            system_loss_db=system_loss_db,
         )
         if measurement is not None:
             measurements.append(measurement)
@@ -195,6 +229,8 @@ def bistatic_measurement(
     position: PositionReport,
     velocity: VelocityReport | None,
     rcs_dbsm: float = DEFAULT_RCS_DBSM,
+    polarization_loss_db: float = DEFAULT_POLARIZATION_LOSS_DB,
+    system_loss_db: float = DEFAULT_SYSTEM_LOSS_DB,
 ) -> BistaticMeasurement | None:
     """Compute passive bistatic SNR, excess range, and bistatic Doppler."""
 
@@ -218,7 +254,7 @@ def bistatic_measurement(
 
     carrier_frequency_hz = emitter.center_frequency_mhz * 1_000_000.0
     wavelength_m = SPEED_OF_LIGHT_MPS / carrier_frequency_hz
-    snr_db = bistatic_snr_db(
+    breakdown = bistatic_snr_breakdown(
         eirp_kw=emitter.eirp_kw,
         receiver_gain_dbi=receiver.receiver_gain_dbi,
         receiver_noise_figure_db=receiver.noise_figure_db,
@@ -227,6 +263,8 @@ def bistatic_measurement(
         rcs_dbsm=rcs_dbsm,
         transmitter_target_range_m=tx_to_target_m,
         target_receiver_range_m=rx_to_target_m,
+        polarization_loss_db=polarization_loss_db,
+        system_loss_db=system_loss_db,
     )
     bistatic_range_rate_mps = None
     if velocity is not None:
@@ -236,12 +274,65 @@ def bistatic_measurement(
 
     return BistaticMeasurement(
         emitter=emitter,
-        snr_db=snr_db,
+        snr_db=breakdown.snr_db,
+        snr_breakdown=breakdown,
         bistatic_range_km=(tx_to_target_m + rx_to_target_m - tx_to_rx.range_m) / 1000.0,
         bistatic_doppler_hz=None
         if bistatic_range_rate_mps is None
         else -bistatic_range_rate_mps / wavelength_m,
         bearing_to_emitter_deg=tx_to_rx.azimuth_deg,
+    )
+
+
+def bistatic_snr_breakdown(
+    *,
+    eirp_kw: float,
+    receiver_gain_dbi: float,
+    receiver_noise_figure_db: float,
+    receiver_bandwidth_mhz: float,
+    wavelength_m: float,
+    rcs_dbsm: float,
+    transmitter_target_range_m: float,
+    target_receiver_range_m: float,
+    polarization_loss_db: float = DEFAULT_POLARIZATION_LOSS_DB,
+    system_loss_db: float = DEFAULT_SYSTEM_LOSS_DB,
+) -> BistaticSnrBreakdown:
+    """Return the bistatic radar equation SNR, itemized term-by-term in dB."""
+
+    eirp_dbw = 10.0 * log10(eirp_kw * 1000.0)
+    wavelength_gain_db = 20.0 * log10(wavelength_m)
+    spreading_loss_db = -30.0 * log10(4.0 * pi)
+    tx_range_loss_db = -20.0 * log10(transmitter_target_range_m)
+    rx_range_loss_db = -20.0 * log10(target_receiver_range_m)
+    noise_floor_db = -(
+        thermal_noise_power_dbw(receiver_bandwidth_mhz) + receiver_noise_figure_db
+    )
+    negative_polarization_loss_db = -polarization_loss_db
+    negative_system_loss_db = -system_loss_db
+    snr_db = (
+        eirp_dbw
+        + receiver_gain_dbi
+        + wavelength_gain_db
+        + rcs_dbsm
+        + spreading_loss_db
+        + tx_range_loss_db
+        + rx_range_loss_db
+        + noise_floor_db
+        + negative_polarization_loss_db
+        + negative_system_loss_db
+    )
+    return BistaticSnrBreakdown(
+        eirp_dbw=eirp_dbw,
+        receiver_gain_dbi=receiver_gain_dbi,
+        wavelength_gain_db=wavelength_gain_db,
+        rcs_dbsm=rcs_dbsm,
+        spreading_loss_db=spreading_loss_db,
+        tx_range_loss_db=tx_range_loss_db,
+        rx_range_loss_db=rx_range_loss_db,
+        noise_floor_db=noise_floor_db,
+        polarization_loss_db=negative_polarization_loss_db,
+        system_loss_db=negative_system_loss_db,
+        snr_db=snr_db,
     )
 
 
@@ -255,21 +346,23 @@ def bistatic_snr_db(
     rcs_dbsm: float,
     transmitter_target_range_m: float,
     target_receiver_range_m: float,
+    polarization_loss_db: float = DEFAULT_POLARIZATION_LOSS_DB,
+    system_loss_db: float = DEFAULT_SYSTEM_LOSS_DB,
 ) -> float:
     """Return bistatic radar equation SNR in dB."""
 
-    eirp_dbw = 10.0 * log10(eirp_kw * 1000.0)
-    noise_power_dbw = thermal_noise_power_dbw(receiver_bandwidth_mhz) + receiver_noise_figure_db
-    return (
-        eirp_dbw
-        + receiver_gain_dbi
-        + 20.0 * log10(wavelength_m)
-        + rcs_dbsm
-        - 30.0 * log10(4.0 * pi)
-        - 20.0 * log10(transmitter_target_range_m)
-        - 20.0 * log10(target_receiver_range_m)
-        - noise_power_dbw
-    )
+    return bistatic_snr_breakdown(
+        eirp_kw=eirp_kw,
+        receiver_gain_dbi=receiver_gain_dbi,
+        receiver_noise_figure_db=receiver_noise_figure_db,
+        receiver_bandwidth_mhz=receiver_bandwidth_mhz,
+        wavelength_m=wavelength_m,
+        rcs_dbsm=rcs_dbsm,
+        transmitter_target_range_m=transmitter_target_range_m,
+        target_receiver_range_m=target_receiver_range_m,
+        polarization_loss_db=polarization_loss_db,
+        system_loss_db=system_loss_db,
+    ).snr_db
 
 
 def thermal_noise_power_dbw(bandwidth_mhz: float) -> float:

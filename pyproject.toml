@@ -8,6 +8,7 @@ authors = [
     { name = "Lincoln Hille" }
 ]
 dependencies = [
+    "prettytable>=3.18.0",
     "textual>=1.0.0",
 ]
 

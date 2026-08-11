@@ -12,6 +12,7 @@ from math import isfinite
 from pathlib import Path
 from typing import ClassVar
 
+from prettytable import PrettyTable
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
@@ -24,7 +25,7 @@ from adsb_console.bistatic import (
     top_bistatic_measurements,
 )
 from adsb_console.config import load_observers_or_default, parse_endpoint
-from adsb_console.models import ObserverConfig, TrackState, utc_now
+from adsb_console.models import ObserverConfig, PositionReport, TrackState, VelocityReport, utc_now
 from adsb_console.tracker import (
     DEFAULT_STALE_TRACK_SECONDS,
     BaseStationTracker,
@@ -44,6 +45,7 @@ DEFAULT_TRACK_RETENTION_MINUTES = DEFAULT_STALE_TRACK_SECONDS / 60.0
 DEFAULT_DTV_FILE = Path("20_DTV_direct_path_input.csv")
 DEFAULT_DTV_BANDS = "uhf"
 DEFAULT_BISTATIC_DISPLAY_TRACKS = 10
+DEFAULT_BISNR_BREAKDOWN_REFRESH_SECONDS = 10.0
 OBSERVER_TABLE = "observer"
 TRACK_FOCUS_TABLE = "track-focus"
 SORT_COLUMNS = (
@@ -122,6 +124,13 @@ class ADSBConsoleApp(App[None]):
         height: 1fr;
     }
 
+    #bisnr-breakdown {
+        height: auto;
+        max-height: 14;
+        padding: 0 1;
+        overflow-y: auto;
+    }
+
     #log {
         width: 1fr;
     }
@@ -192,6 +201,7 @@ class ADSBConsoleApp(App[None]):
         self.filter_input: Input | None = None
         self.track_detail: Static | None = None
         self.event_log: RichLog | None = None
+        self.bisnr_breakdown: Static | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -205,6 +215,7 @@ class ADSBConsoleApp(App[None]):
                 )
                 yield Static("", id="track-detail")
                 yield DataTable(id="tracks")
+                yield Static("", id="bisnr-breakdown")
             yield RichLog(
                 id="log",
                 highlight=True,
@@ -219,10 +230,12 @@ class ADSBConsoleApp(App[None]):
         self.filter_input = self.query_one("#filter", Input)
         self.track_detail = self.query_one("#track-detail", Static)
         self.event_log = self.query_one("#log", RichLog)
+        self.bisnr_breakdown = self.query_one("#bisnr-breakdown", Static)
         self.table.cursor_type = "row"
         self._ensure_table_layout(OBSERVER_TABLE)
         self._write_log(f"Loaded {len(self.observers)} observer(s)")
         self._write_log(f"Loaded {len(self.dtv_emitters)} DTV emitter(s)")
+        self.set_interval(DEFAULT_BISNR_BREAKDOWN_REFRESH_SECONDS, self._refresh_bisnr_breakdown)
         self.run_worker(self._monitor_source(), name="source-monitor", exclusive=True)
 
     async def _monitor_source(self) -> None:
@@ -346,6 +359,25 @@ class ADSBConsoleApp(App[None]):
                 *track_focus_row(observed_track, measurements),
                 key=observed_track.observer_name,
             )
+
+    def _refresh_bisnr_breakdown(self) -> None:
+        if self.bisnr_breakdown is None:
+            return
+        if self.screen_focus != TRACK_FOCUS_TABLE or self.selected_track_icao is None:
+            self.bisnr_breakdown.update("")
+            return
+        track = self.tracker.tracks.get(self.selected_track_icao)
+        if track is None or track.last_position is None:
+            self.bisnr_breakdown.update("BiSNR breakdown: no position")
+            return
+        self.bisnr_breakdown.update(
+            bisnr_breakdown_table(
+                self.observers,
+                self.dtv_emitters,
+                track.last_position,
+                track.last_velocity,
+            )
+        )
 
     def _track_focus_snapshot(self, now: datetime) -> TrackFocusSnapshot | None:
         if self.selected_track_icao is None:
@@ -499,6 +531,7 @@ class ADSBConsoleApp(App[None]):
         self.last_filter_result = self._refresh_table()
         self._write_log("Focus: observer")
         self._update_summary(self._summary_text())
+        self._refresh_bisnr_breakdown()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if self.screen_focus != OBSERVER_TABLE:
@@ -515,6 +548,7 @@ class ADSBConsoleApp(App[None]):
         self._refresh_track_focus_table()
         self._write_log(f"Focus: track {icao}")
         self._update_summary(self._summary_text())
+        self._refresh_bisnr_breakdown()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.icao_filter_text = event.value.strip()
@@ -809,6 +843,71 @@ def _format_bistatic_summary(
         f"{measurement.bistatic_range_km:.0f}km"
         f"{doppler}"
     )
+
+
+def bisnr_breakdown_table(
+    observers: list[ObserverConfig],
+    emitters: list[DtvEmitter],
+    position: PositionReport,
+    velocity: VelocityReport | None,
+) -> str:
+    """Render the bistatic SNR equation broken out by term, one row per observer.
+
+    Uses the strongest DTV emitter for each observer (the same one behind its
+    "BiSNR 1" column) so the breakdown explains a number already on screen.
+    """
+
+    table = PrettyTable()
+    table.field_names = [
+        "Observer",
+        "Tower",
+        "EIRP",
+        "Gr",
+        "20logλ",
+        "RCS",
+        "Spread",
+        "TxLoss",
+        "RxLoss",
+        "Noise",
+        "PolLoss",
+        "SysLoss",
+        "SNR",
+    ]
+    for field in table.field_names:
+        table.align[field] = "l" if field in ("Observer", "Tower") else "r"
+
+    for observer in observers:
+        measurements = top_bistatic_measurements(
+            emitters=emitters,
+            receiver=observer,
+            position=position,
+            velocity=velocity,
+            count=1,
+        )
+        if not measurements:
+            table.add_row([observer.name[:16], *(["-"] * (len(table.field_names) - 1))])
+            continue
+        measurement = measurements[0]
+        breakdown = measurement.snr_breakdown
+        tower = measurement.emitter.call_sign or measurement.emitter.site_name or "DTV"
+        table.add_row(
+            [
+                observer.name[:16],
+                tower[:12],
+                f"{breakdown.eirp_dbw:.1f}",
+                f"{breakdown.receiver_gain_dbi:.1f}",
+                f"{breakdown.wavelength_gain_db:.1f}",
+                f"{breakdown.rcs_dbsm:.1f}",
+                f"{breakdown.spreading_loss_db:.1f}",
+                f"{breakdown.tx_range_loss_db:.1f}",
+                f"{breakdown.rx_range_loss_db:.1f}",
+                f"{breakdown.noise_floor_db:.1f}",
+                f"{breakdown.polarization_loss_db:.1f}",
+                f"{breakdown.system_loss_db:.1f}",
+                f"{breakdown.snr_db:.1f}",
+            ]
+        )
+    return str(table)
 
 
 def bistatic_tower_log_table(

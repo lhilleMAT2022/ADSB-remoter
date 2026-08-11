@@ -14,8 +14,14 @@ DEFAULT_LOCAL_OBSERVER = ObserverConfig(
     latitude_deg=42.299350798761694,
     longitude_deg=-71.34948267330608,
     altitude_m=75.0,
-    receiver_gain_dbi=30.0,
+    # Residential boosted UHF/VHF Yagi (real isotropic-referenced gain, not
+    # marketing "dB gain"). A 30 dBi default implied an ~8m tracking dish,
+    # which isn't physically what's mounted here. The mast-mounted preamp
+    # raises effective sensitivity via noise_figure_db, not antenna gain.
+    receiver_gain_dbi=10.0,
     noise_figure_db=3.0,
+    # Front end samples the 6 MHz ATSC channel plus a 1 MHz guard on each
+    # side (matches the actual capture bandwidth), so 8 MHz is intentional.
     bandwidth_mhz=8.0,
 )
 DEFAULT_REMOTE_OBSERVER = ObserverConfig(
