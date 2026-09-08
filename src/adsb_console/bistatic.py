@@ -80,6 +80,21 @@ class DtvEmitter:
             f"{self.latitude_deg:.5f}:{self.longitude_deg:.5f}:{self.altitude_m:.1f}"
         )
 
+    @property
+    def transmitter_site_id(self) -> str:
+        """Stable identity for the physical transmitter geometry."""
+
+        return self.tower_key
+
+    @property
+    def emitter_id(self) -> str:
+        """Stable identity for one facility/channel/frequency emitter."""
+
+        return (
+            f"dtv:{self.facility_id or 'unknown'}:"
+            f"{self.rf_channel}:{self.center_frequency_mhz:.6f}"
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class BistaticSnrBreakdown:
@@ -112,6 +127,8 @@ class BistaticMeasurement:
     bistatic_range_km: float
     bistatic_doppler_hz: float | None
     bearing_to_emitter_deg: float
+    bistatic_range_m: float | None = None
+    bistatic_range_rate_mps: float | None = None
 
 
 def load_dtv_emitters(
@@ -281,6 +298,8 @@ def bistatic_measurement(
         if bistatic_range_rate_mps is None
         else -bistatic_range_rate_mps / wavelength_m,
         bearing_to_emitter_deg=tx_to_rx.azimuth_deg,
+        bistatic_range_m=tx_to_target_m + rx_to_target_m - tx_to_rx.range_m,
+        bistatic_range_rate_mps=bistatic_range_rate_mps,
     )
 
 

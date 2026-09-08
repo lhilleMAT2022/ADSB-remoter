@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "corpus_directory_environment_variable": "ADSB_REPLAY_CORPUS_DIR",
+  "default_relative_corpus_directory": "../000_sbs_for_ELAD_cleanup/sbs_clean",
+  "partitions": [
+    {
+      "id": "A_startup_smoke",
+      "source_file": "10_adsb_20220413_060850.csv.gz",
+      "start_line": 1,
+      "max_lines": 50000,
+      "classification": "startup_smoke"
+    },
+    {
+      "id": "B_track_maturity",
+      "source_file": "11_adsb_20220413_060850.csv.gz",
+      "start_line": 1,
+      "max_lines": 150000,
+      "classification": "track_maturity"
+    },
+    {
+      "id": "C_stable_straight",
+      "source_file": "12_adsb_20220413_060850.csv.gz",
+      "start_line": 1,
+      "max_lines": 500000,
+      "classification": "stable_straight_track",
+      "candidate_selection": "manifest_continuity_at_least_300_s"
+    },
+    {
+      "id": "D_maneuver",
+      "source_file": "13_adsb_20220413_060850.csv.gz",
+      "start_line": 1,
+      "max_lines": 500000,
+      "classification": "maneuver_and_prediction_error",
+      "candidate_selection": "manifest_maneuver_candidate"
+    },
+    {
+      "id": "E_lifecycle",
+      "source_file": "14_adsb_20220413_060850.csv.gz",
+      "start_line": 1,
+      "max_lines": 250000,
+      "classification": "track_lifecycle"
+    },
+    {
+      "id": "F_high_density",
+      "source_file": "15_adsb_20220413_060850.csv.gz",
+      "start_line": 1,
+      "max_lines": 500000,
+      "classification": "high_density"
+    },
+    {
+      "id": "G_multi_observer_emitter",
+      "source_file": "16_adsb_20220413_060850.csv.gz",
+      "start_line": 1,
+      "max_lines": 250000,
+      "classification": "multi_observer_multi_emitter"
+    },
+    {
+      "id": "H_full_endurance",
+      "source_files": [
+        "10_adsb_20220413_060850.csv.gz",
+        "11_adsb_20220413_060850.csv.gz",
+        "12_adsb_20220413_060850.csv.gz",
+        "13_adsb_20220413_060850.csv.gz",
+        "14_adsb_20220413_060850.csv.gz",
+        "15_adsb_20220413_060850.csv.gz",
+        "16_adsb_20220413_060850.csv.gz",
+        "17_adsb_20220413_060850.csv.gz",
+        "18_adsb_20220413_060850.csv.gz",
+        "19_adsb_20220413_060850.csv.gz",
+        "20_adsb_20220413_060850.csv.gz"
+      ],
+      "classification": "full_corpus_endurance"
+    }
+  ]
+}

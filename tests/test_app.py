@@ -26,6 +26,14 @@ from adsb_console.tracker import ObservedTrack
 from adsb_console.transforms import ClosestPointOfApproach, RangeAzEl
 
 
+def test_manual_cue_and_mode_bindings_preserve_lowercase_quit() -> None:
+    bindings = {key: action for key, action, _description in ADSBConsoleApp.BINDINGS}
+
+    assert bindings["q"] == "quit"
+    assert bindings["shift+q"] == "publish_selected_cue"
+    assert bindings["m"] == "toggle_cue_mode"
+
+
 def test_app_constructs_without_textual_attribute_collisions() -> None:
     app = ADSBConsoleApp(source=("127.0.0.1", 28887))
 

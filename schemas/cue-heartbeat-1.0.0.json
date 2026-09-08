@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://passive-radar.local/schemas/cue-heartbeat-1.0.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "message_type", "message_id", "source", "source_instance_id",
+    "sequence_number", "generated_utc", "status", "active_tracks",
+    "cue_eligible_tracks", "active_observers", "implemented_observers", "enabled_emitters"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "message_type": { "const": "cue_heartbeat" },
+    "message_id": { "type": "string", "format": "uuid" },
+    "source": { "const": "ADSBConsoleApp" },
+    "source_instance_id": { "type": "string", "minLength": 1 },
+    "sequence_number": { "type": "integer", "minimum": 1 },
+    "generated_utc": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["starting", "running", "degraded", "stopping"] },
+    "active_tracks": { "type": "integer", "minimum": 0 },
+    "cue_eligible_tracks": { "type": "integer", "minimum": 0 },
+    "active_observers": { "type": "integer", "minimum": 0 },
+    "implemented_observers": { "type": "integer", "minimum": 0 },
+    "enabled_emitters": { "type": "integer", "minimum": 0 },
+    "udp_destination": { "type": ["string", "null"] },
+    "last_full_snapshot_utc": { "type": ["string", "null"], "format": "date-time" }
+  }
+}

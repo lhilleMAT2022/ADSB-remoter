@@ -8,6 +8,7 @@ from adsb_console.config import (
     parse_endpoint,
     parse_endpoint_list,
 )
+from adsb_console.cue_config import CuePublicationMode, load_cue_runtime_config
 from adsb_console.models import ObserverConfig, ObserverRole
 
 
@@ -70,3 +71,11 @@ def test_default_observers_are_deployment_observers() -> None:
     assert observers[1].longitude_deg == -71.21565924108836
     assert observers[1].altitude_m == 350.0
     assert load_observers_or_default(None) == observers
+
+
+def test_cue_configuration_loads_manual_publication_mode() -> None:
+    config = load_cue_runtime_config("tests/fixtures/cue-manual.json")
+
+    assert config.prediction.enabled
+    assert config.udp_output.enabled
+    assert config.publication_mode is CuePublicationMode.MANUAL

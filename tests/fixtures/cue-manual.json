@@ -1,0 +1,11 @@
+{
+  "publication_mode": "manual",
+  "cue_prediction": {
+    "enabled": true
+  },
+  "udp_output": {
+    "enabled": true,
+    "destination_address": "127.0.0.1",
+    "destination_port": 31001
+  }
+}

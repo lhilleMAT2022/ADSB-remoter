@@ -117,6 +117,9 @@ def test_tracker_purges_tracks_stale_for_more_than_retention_window() -> None:
 
     assert set(tracker.tracks) == {"NEW001"}
     assert tracker.purged_track_count == 1
+    purged = tracker.drain_purged_tracks()
+    assert [track.icao for track in purged] == ["OLD001"]
+    assert tracker.drain_purged_tracks() == []
 
 
 def test_tracker_can_disable_stale_track_purge() -> None:

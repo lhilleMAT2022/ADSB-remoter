@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from math import isfinite
 from pathlib import Path
 from typing import ClassVar
+from uuid import uuid4
 
 from prettytable import PrettyTable
 from textual.app import App, ComposeResult
@@ -25,7 +27,19 @@ from adsb_console.bistatic import (
     top_bistatic_measurements,
 )
 from adsb_console.config import load_observers_or_default, parse_endpoint
+from adsb_console.cue import UdpCuePublisher
+from adsb_console.cue_config import CuePublicationMode, CueRuntimeConfig, load_cue_runtime_config
 from adsb_console.models import ObserverConfig, PositionReport, TrackState, VelocityReport, utc_now
+from adsb_console.prediction import (
+    PredictionRevisionManager,
+    PredictionToken,
+    PredictionTriggerEvaluator,
+    PredictionUpdateReason,
+    PredictionValidation,
+    TrackPrediction,
+    build_track_prediction,
+    track_id,
+)
 from adsb_console.tracker import (
     DEFAULT_STALE_TRACK_SECONDS,
     BaseStationTracker,
@@ -146,6 +160,8 @@ class ADSBConsoleApp(App[None]):
         ("enter", "focus_selected_track", "Track focus"),
         ("o", "next_observer", "Next observer"),
         ("q", "quit", "Quit"),
+        ("shift+q", "publish_selected_cue", "Send cue"),
+        ("m", "toggle_cue_mode", "Cue mode"),
         ("s", "next_sort_column", "Sort column"),
         ("u", "next_update_rate", "Update rate"),
         ("escape", "observer_focus", "Observer focus"),
@@ -167,6 +183,9 @@ class ADSBConsoleApp(App[None]):
         dtv_file: Path | None = DEFAULT_DTV_FILE,
         dtv_bands: str = DEFAULT_DTV_BANDS,
         bistatic_display_tracks: int = DEFAULT_BISTATIC_DISPLAY_TRACKS,
+        cue_runtime_config: CueRuntimeConfig | None = None,
+        event_clock: Callable[[], datetime] | None = None,
+        source_instance_id: str | None = None,
     ) -> None:
         super().__init__()
         self.source = source
@@ -186,6 +205,22 @@ class ADSBConsoleApp(App[None]):
         self.dtv_bands = parse_dtv_bands(dtv_bands)
         self.dtv_emitters = load_dtv_emitters(dtv_file, self.dtv_bands)
         self.bistatic_display_tracks = max(bistatic_display_tracks, 0)
+        self.cue_runtime_config = cue_runtime_config or load_cue_runtime_config(None)
+        self._event_clock = event_clock or utc_now
+        self.predictions: dict[str, TrackPrediction] = {}
+        self._prediction_revisions = PredictionRevisionManager()
+        self._prediction_triggers = PredictionTriggerEvaluator(
+            self.cue_runtime_config.prediction
+        )
+        self._prediction_tasks: dict[str, asyncio.Task[None]] = {}
+        self._cue_publisher = (
+            UdpCuePublisher(
+                self.cue_runtime_config.udp_output,
+                source_instance_id=source_instance_id or f"adsb-console-{uuid4()}",
+            )
+            if self.cue_runtime_config.udp_output.enabled
+            else None
+        )
         self.reported_bistatic_towers: set[tuple[str, str, str]] = set()
         self.icao_filter_text = icao_filter
         self.icao_filter = _compile_icao_filter(icao_filter)
@@ -202,6 +237,8 @@ class ADSBConsoleApp(App[None]):
         self.track_detail: Static | None = None
         self.event_log: RichLog | None = None
         self.bisnr_breakdown: Static | None = None
+        self._last_snapshot_utc: datetime | None = None
+        self._published_cue_revisions: dict[str, int] = {}
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -235,8 +272,19 @@ class ADSBConsoleApp(App[None]):
         self._ensure_table_layout(OBSERVER_TABLE)
         self._write_log(f"Loaded {len(self.observers)} observer(s)")
         self._write_log(f"Loaded {len(self.dtv_emitters)} DTV emitter(s)")
+        cue_state = "enabled" if self.cue_runtime_config.prediction.enabled else "disabled"
+        self._write_log(f"Passive-radar cue prediction {cue_state}")
         self.set_interval(DEFAULT_BISNR_BREAKDOWN_REFRESH_SECONDS, self._refresh_bisnr_breakdown)
+        self.set_interval(1.0, self._schedule_periodic_predictions)
+        if self._cue_publisher is not None:
+            udp_config = self.cue_runtime_config.udp_output
+            self.set_interval(udp_config.heartbeat_interval_s, self._schedule_heartbeat)
+            self.set_interval(udp_config.snapshot_interval_s, self._schedule_snapshot)
         self.run_worker(self._monitor_source(), name="source-monitor", exclusive=True)
+
+    def on_unmount(self) -> None:
+        if self._cue_publisher is not None:
+            self._cue_publisher.close()
 
     async def _monitor_source(self) -> None:
         self._write_log(f"Connecting to {self.source[0]}:{self.source[1]}")
@@ -261,6 +309,8 @@ class ADSBConsoleApp(App[None]):
                 track = self.tracker.update_line(decoded)
                 if track is not None:
                     self.last_track_icao = track.icao
+                    self._schedule_prediction(track)
+                    self._publish_purged_track_withdrawals()
                     now_monotonic = asyncio.get_running_loop().time()
                     if now_monotonic >= next_refresh_at:
                         self.last_filter_result = self._refresh_table()
@@ -269,6 +319,167 @@ class ADSBConsoleApp(App[None]):
         finally:
             writer.close()
             await writer.wait_closed()
+
+    def _schedule_periodic_predictions(self) -> None:
+        if not self.cue_runtime_config.prediction.enabled:
+            return
+        for track in self.tracker.active_tracks():
+            self._schedule_prediction(track)
+
+    def _schedule_prediction(self, track: TrackState) -> None:
+        if not self.cue_runtime_config.prediction.enabled:
+            return
+        key = track_id(track)
+        pending = self._prediction_tasks.get(key)
+        if pending is not None and not pending.done():
+            # Keep one bounded background computation per track. The periodic
+            # scheduler will compare the next report with the committed result.
+            return
+        previous = self.predictions.get(key)
+        decision = self._prediction_triggers.evaluate(track, previous, self._event_clock())
+        if not decision.regenerate or decision.reason is None:
+            return
+        token = self._prediction_revisions.request(key)
+        track_snapshot = copy.deepcopy(track)
+        task = asyncio.create_task(
+            self._compute_prediction(
+                track_snapshot,
+                token,
+                decision.reason,
+                decision.validation,
+            )
+        )
+        self._prediction_tasks[key] = task
+        task.add_done_callback(lambda finished, track_key=key: self._clear_prediction_task(track_key, finished))
+
+    def _clear_prediction_task(self, track_key: str, finished: asyncio.Task[None]) -> None:
+        if self._prediction_tasks.get(track_key) is finished:
+            self._prediction_tasks.pop(track_key, None)
+
+    async def _compute_prediction(
+        self,
+        track: TrackState,
+        token: PredictionToken,
+        reason: PredictionUpdateReason,
+        validation: PredictionValidation,
+    ) -> None:
+        """Compute off the SBS/Textual path, then commit only the current token."""
+
+        prediction = await asyncio.to_thread(
+            build_track_prediction,
+            track=track,
+            reference_origin=next(
+                (observer for observer in self.observers if observer.is_local),
+                self.observers[0],
+            ),
+            observers=self.observers,
+            emitters=self.dtv_emitters,
+            config=self.cue_runtime_config.prediction,
+            token=token,
+            created_utc=self._event_clock(),
+            update_reason=reason,
+            validation=validation,
+        )
+        if not self._prediction_revisions.is_current(token):
+            return
+        if track.icao not in self.tracker.tracks:
+            return
+        self.predictions[prediction.track_id] = prediction
+        if (
+            self._cue_publisher is not None
+            and prediction.state is not None
+            and self.cue_runtime_config.publication_mode is CuePublicationMode.AUTOMATIC
+        ):
+            result = await asyncio.to_thread(self._cue_publisher.publish_prediction, prediction)
+            if result is not None:
+                self._published_cue_revisions[prediction.track_id] = prediction.revision
+
+    def _schedule_heartbeat(self) -> None:
+        if self._cue_publisher is None:
+            return
+        self.run_worker(asyncio.to_thread(self._publish_heartbeat), name="cue-heartbeat")
+
+    def _publish_heartbeat(self) -> None:
+        assert self._cue_publisher is not None
+        self._cue_publisher.publish_heartbeat(
+            active_tracks=len(self.tracker.tracks),
+            cue_eligible_tracks=len(self.predictions),
+            active_observers=len(self.observers),
+            enabled_emitters=len(self.dtv_emitters),
+            last_full_snapshot_utc=self._last_snapshot_utc,
+        )
+
+    def _schedule_snapshot(self) -> None:
+        if (
+            self._cue_publisher is None
+            or self.cue_runtime_config.publication_mode is CuePublicationMode.MANUAL
+        ):
+            return
+        self.run_worker(self._publish_snapshot(), name="cue-snapshot", exclusive=True)
+
+    async def _publish_snapshot(self) -> None:
+        if self._cue_publisher is None:
+            return
+        snapshot_id = f"snapshot:{uuid4()}"
+        predictions = tuple(
+            prediction
+            for prediction in self.predictions.values()
+            if prediction.state is not None
+        )
+        begin = await asyncio.to_thread(
+            self._cue_publisher.publish_snapshot_boundary,
+            begin=True,
+            snapshot_id=snapshot_id,
+            expected_track_count=len(predictions),
+        )
+        if begin is None:
+            return
+        published = 0
+        failed = 0
+        for prediction in predictions:
+            result = await asyncio.to_thread(
+                self._cue_publisher.publish_prediction,
+                prediction,
+                snapshot_id=snapshot_id,
+            )
+            if result is None:
+                failed += 1
+            else:
+                published += 1
+                self._published_cue_revisions[prediction.track_id] = prediction.revision
+        end = await asyncio.to_thread(
+            self._cue_publisher.publish_snapshot_boundary,
+            begin=False,
+            snapshot_id=snapshot_id,
+            published_track_count=published,
+            failed_track_count=failed,
+        )
+        if end is not None:
+            self._last_snapshot_utc = self._event_clock()
+
+    def _publish_purged_track_withdrawals(self) -> None:
+        for track in self.tracker.drain_purged_tracks():
+            key = track_id(track)
+            self._prediction_revisions.invalidate(key)
+            prior = self.predictions.pop(key, None)
+            published_revision = self._published_cue_revisions.pop(key, None)
+            if (
+                prior is None
+                or published_revision is None
+                or self._cue_publisher is None
+            ):
+                continue
+            self.run_worker(
+                asyncio.to_thread(
+                    self._cue_publisher.publish_withdrawal,
+                    track_id=prior.track_id,
+                    icao=prior.icao,
+                    revision=published_revision,
+                    reason="track_purged",
+                ),
+                name=f"cue-withdrawal-{track.icao}",
+                exclusive=False,
+            )
 
     def _refresh_table(self) -> DisplayFilterResult:
         if self.screen_focus == TRACK_FOCUS_TABLE:
@@ -337,7 +548,15 @@ class ADSBConsoleApp(App[None]):
             self._update_track_detail("Track focus: no selected track")
             return
         self.track_focus_snapshot = snapshot
-        self._update_track_detail(_track_focus_detail(snapshot, now, self.age_out_seconds))
+        detail = _track_focus_detail(snapshot, now, self.age_out_seconds)
+        prediction = self.predictions.get(track_id(snapshot.track))
+        if prediction is not None:
+            next_windows = sum(len(item.windows) for item in prediction.opportunities)
+            detail += (
+                f"\nPrediction: rev {prediction.revision} | {prediction.maturity.value} | "
+                f"{prediction.update_reason.value} | Windows: {next_windows}"
+            )
+        self._update_track_detail(detail)
         for observed_track in snapshot.observed_tracks:
             track = snapshot.track
             measurements = (
@@ -521,6 +740,65 @@ class ADSBConsoleApp(App[None]):
             return
         self._enter_track_focus(str(row[0]))
 
+    def action_publish_selected_cue(self) -> None:
+        """Send the current selected track only when the operator requests it."""
+
+        if self._cue_publisher is None:
+            self._write_log("[yellow]Cue UDP publication is disabled[/]")
+            return
+        selected_icao = self._selected_icao_for_cue()
+        if selected_icao is None:
+            self._write_log("[yellow]Select a track in Observer or Track Focus first[/]")
+            return
+        prediction = self.predictions.get(f"adsb:{selected_icao}")
+        if prediction is None or prediction.state is None:
+            track = self.tracker.tracks.get(selected_icao)
+            if track is not None:
+                self._schedule_prediction(track)
+            self._write_log(f"[yellow]Prediction pending for {selected_icao}; press Q again[/]")
+            return
+        self.run_worker(
+            self._publish_operator_selected_cue(prediction),
+            name=f"cue-selected-{selected_icao}",
+            exclusive=True,
+        )
+
+    async def _publish_operator_selected_cue(self, prediction: TrackPrediction) -> None:
+        if self._cue_publisher is None:
+            return
+        result = await asyncio.to_thread(self._cue_publisher.publish_prediction, prediction)
+        if result is None:
+            self._write_log(f"[red]Cue publication failed for {prediction.icao}[/]")
+            return
+        self._published_cue_revisions[prediction.track_id] = prediction.revision
+        self._write_log(f"Cue published for {prediction.icao}, revision {prediction.revision}")
+
+    def _selected_icao_for_cue(self) -> str | None:
+        if self.screen_focus == TRACK_FOCUS_TABLE:
+            return self.selected_track_icao
+        if (
+            self.table is None
+            or not self.table.is_valid_row_index(self.table.cursor_row)
+            or (self.filter_input is not None and self.focused is self.filter_input)
+        ):
+            return None
+        row = self.table.get_row_at(self.table.cursor_row)
+        return None if not row else str(row[0])
+
+    def action_toggle_cue_mode(self) -> None:
+        current = self.cue_runtime_config.publication_mode
+        self.cue_runtime_config = CueRuntimeConfig(
+            prediction=self.cue_runtime_config.prediction,
+            udp_output=self.cue_runtime_config.udp_output,
+            publication_mode=(
+                CuePublicationMode.MANUAL
+                if current is CuePublicationMode.AUTOMATIC
+                else CuePublicationMode.AUTOMATIC
+            ),
+        )
+        self._write_log(f"Cue publication mode: {self.cue_runtime_config.publication_mode.value}")
+        self._update_summary(self._summary_text())
+
     def action_observer_focus(self) -> None:
         if self.screen_focus == OBSERVER_TABLE:
             return
@@ -574,6 +852,8 @@ class ADSBConsoleApp(App[None]):
             f"{prefix}Messages: {self.tracker.message_count} | "
             f"Tracks: {len(self.tracker.tracks)} | "
             f"Purged: {self.tracker.purged_track_count} | "
+            f"Cues: {len(self.predictions)} | "
+            f"Cue mode: {self.cue_runtime_config.publication_mode.value} | "
             f"Observer: {self.selected_observer.name} | "
             f"Visible: {filter_result.visible_count}/{filter_result.observer_track_count} | "
             f"Hidden: {filter_result.hidden_count} | "
@@ -599,6 +879,8 @@ class ADSBConsoleApp(App[None]):
             f"{prefix}Messages: {self.tracker.message_count} | "
             f"Tracks: {len(self.tracker.tracks)} | "
             f"Purged: {self.tracker.purged_track_count} | "
+            f"Cues: {len(self.predictions)} | "
+            f"Cue mode: {self.cue_runtime_config.publication_mode.value} | "
             f"Focus: Track {selected} | "
             f"Status: {track_status} | "
             f"Observers: {observer_count} | "
@@ -652,6 +934,12 @@ def main() -> None:
         type=int,
         help="Compute main-table DTV bistatic columns for this many closest tracks.",
     )
+    parser.add_argument(
+        "--cue-config",
+        default=None,
+        type=Path,
+        help="JSON configuration enabling passive-radar cue prediction and optional UDP output.",
+    )
     args = parser.parse_args()
 
     ADSBConsoleApp(
@@ -668,6 +956,7 @@ def main() -> None:
         dtv_file=args.dtv_file,
         dtv_bands=args.dtv_bands,
         bistatic_display_tracks=args.bistatic_display_tracks,
+        cue_runtime_config=load_cue_runtime_config(args.cue_config),
     ).run()
 
 

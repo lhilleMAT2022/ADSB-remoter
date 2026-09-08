@@ -49,6 +49,7 @@ class BaseStationTracker:
         self.message_count = 0
         self.invalid_count = 0
         self.purged_track_count = 0
+        self._purged_tracks: list[TrackState] = []
 
     @property
     def tracks(self) -> dict[str, TrackState]:
@@ -96,10 +97,21 @@ class BaseStationTracker:
         cutoff = now - timedelta(seconds=self._stale_track_seconds)
         stale_icaos = [icao for icao, track in self._tracks.items() if track.last_seen < cutoff]
         for icao in stale_icaos:
-            del self._tracks[icao]
+            self._purged_tracks.append(self._tracks.pop(icao))
         purged_count = len(stale_icaos)
         self.purged_track_count += purged_count
         return purged_count
+
+    def drain_purged_tracks(self) -> list[TrackState]:
+        """Return and clear tracks purged since the preceding drain.
+
+        Consumers that publish lifecycle state use this before losing the
+        final ICAO/callsign/revision association.
+        """
+
+        purged = self._purged_tracks
+        self._purged_tracks = []
+        return purged
 
     def active_tracks(self) -> list[TrackState]:
         return sorted(self._tracks.values(), key=lambda item: item.last_seen, reverse=True)

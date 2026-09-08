@@ -81,6 +81,20 @@ Monitor a live or playback BaseStation TCP stream in the Textual TUI:
 adsb-console --source 127.0.0.1:28887
 ```
 
+### Passive-radar cue publication
+
+Cue prediction and UDP publication are disabled unless a cue configuration is supplied:
+
+```powershell
+adsb-console --source 127.0.0.1:28887 --cue-config .\examples\passive-radar-cueing.json
+```
+
+`publication_mode` is `automatic` by default: every eligible committed prediction is
+published. Set it to `manual` to keep computing/displaying predictions while publishing
+only the track selected in Observer Focus or Track Focus when uppercase `Q` is pressed.
+Press `m` to switch modes during a TUI session. Uppercase `Q` is intentionally distinct
+from lowercase `q`, which continues to quit the TUI.
+
 Observer configuration is loaded from an INI file. The TUI always has a local observer and displays range, azimuth, and elevation from the selected observer. Press `o` to cycle observers.
 
 ```powershell
@@ -104,6 +118,8 @@ Display controls:
 - `Esc`: return from track focus to observer focus
 - `s`: cycle the active sort column
 - `u`: cycle screen update interval through 2, 5, 10, and 30 seconds
+- `m`: switch cue publication between automatic and manual
+- `Q`: publish the selected track cue in either focus mode
 
 In track focus, the top detail area shows the selected track's ICAO, callsign, message count, last LLA, ground speed, and age. The table below shows every observer's range, range rate, azimuth, Doppler, CPA range, CPA bearing, and time to CPA for that selected track. If the focused track ages out or is purged, the screen keeps the last values and marks the track as aged-out or dropped.
 
@@ -126,6 +142,20 @@ $env:PYRIGHT_PYTHON_CACHE_DIR=(Resolve-Path .\.pyright-cache).Path; pyright
 ```
 
 The cache flags and environment variable avoid local OneDrive/cache permission issues seen on this workstation.
+
+Generate a manifest for the externally stored replay corpus (it records hashes and does
+not copy the corpus):
+
+```powershell
+$env:ADSB_REPLAY_CORPUS_DIR = "..\000_sbs_for_ELAD_cleanup\sbs_clean"
+python .\tools\generate_replay_manifest.py
+```
+
+Capture and schema-validate planner-facing UDP traffic:
+
+```powershell
+python .\tools\cue_capture.py --bind 127.0.0.1:31001 --duration-s 60
+```
 
 ## Local Launchers
 

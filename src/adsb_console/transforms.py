@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import atan2, cos, degrees, hypot, isfinite, radians, sin, sqrt
+from math import atan2, cos, degrees, hypot, isfinite, pi, radians, sin, sqrt
 
 from adsb_console.models import ObserverConfig, PositionReport, VelocityReport
 
@@ -108,6 +108,63 @@ def ecef_to_enu(target: EcefPoint, observer: ObserverConfig) -> EnuPoint:
     )
 
 
+def enu_to_ecef(point: EnuPoint, observer: ObserverConfig) -> EcefPoint:
+    """Convert an observer-centered ENU point to WGS-84 ECEF meters."""
+
+    origin = lla_to_ecef(observer.latitude_deg, observer.longitude_deg, observer.altitude_m)
+    lat = radians(observer.latitude_deg)
+    lon = radians(observer.longitude_deg)
+    sin_lat = sin(lat)
+    cos_lat = cos(lat)
+    sin_lon = sin(lon)
+    cos_lon = cos(lon)
+    return EcefPoint(
+        x_m=(
+            origin.x_m
+            - sin_lon * point.east_m
+            - sin_lat * cos_lon * point.north_m
+            + cos_lat * cos_lon * point.up_m
+        ),
+        y_m=(
+            origin.y_m
+            + cos_lon * point.east_m
+            - sin_lat * sin_lon * point.north_m
+            + cos_lat * sin_lon * point.up_m
+        ),
+        z_m=origin.z_m + cos_lat * point.north_m + sin_lat * point.up_m,
+    )
+
+
+def ecef_to_lla(point: EcefPoint) -> tuple[float, float, float]:
+    """Convert WGS-84 ECEF meters to geodetic latitude, longitude, altitude."""
+
+    longitude_rad = atan2(point.y_m, point.x_m)
+    horizontal_m = hypot(point.x_m, point.y_m)
+    if horizontal_m == 0.0:
+        latitude_rad = 0.5 * pi if point.z_m >= 0.0 else -0.5 * pi
+        polar_radius_m = WGS84_A_M * (1.0 - WGS84_F)
+        return degrees(latitude_rad), degrees(longitude_rad), abs(point.z_m) - polar_radius_m
+
+    latitude_rad = atan2(point.z_m, horizontal_m * (1.0 - WGS84_E2))
+    altitude_m = 0.0
+    for _ in range(8):
+        sin_lat = sin(latitude_rad)
+        radius_m = WGS84_A_M / sqrt(1.0 - WGS84_E2 * sin_lat * sin_lat)
+        altitude_m = horizontal_m / cos(latitude_rad) - radius_m
+        next_latitude_rad = atan2(
+            point.z_m,
+            horizontal_m * (1.0 - WGS84_E2 * radius_m / (radius_m + altitude_m)),
+        )
+        if abs(next_latitude_rad - latitude_rad) < 1e-13:
+            latitude_rad = next_latitude_rad
+            break
+        latitude_rad = next_latitude_rad
+    sin_lat = sin(latitude_rad)
+    radius_m = WGS84_A_M / sqrt(1.0 - WGS84_E2 * sin_lat * sin_lat)
+    altitude_m = horizontal_m / cos(latitude_rad) - radius_m
+    return degrees(latitude_rad), degrees(longitude_rad), altitude_m
+
+
 def ecef_vector_to_enu(vector: EcefVector, observer: ObserverConfig) -> EnuVector:
     """Project an ECEF vector into an observer-centered ENU frame."""
 
@@ -171,6 +228,18 @@ def position_to_enu(position: PositionReport, observer: ObserverConfig) -> EnuPo
 
     ecef = lla_to_ecef(position.latitude_deg, position.longitude_deg, position.altitude_m)
     return ecef_to_enu(ecef, observer)
+
+
+def enu_to_position(point: EnuPoint, observer: ObserverConfig, reported_at: datetime) -> PositionReport:
+    """Convert an ENU point to a geodetic position report."""
+
+    latitude_deg, longitude_deg, altitude_m = ecef_to_lla(enu_to_ecef(point, observer))
+    return PositionReport(
+        latitude_deg=latitude_deg,
+        longitude_deg=longitude_deg,
+        altitude_ft=altitude_m / 0.3048,
+        reported_at=reported_at,
+    )
 
 
 def velocity_to_observer_enu(

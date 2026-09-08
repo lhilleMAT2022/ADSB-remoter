@@ -309,6 +309,21 @@ sibling `../000_sbs_for_ELAD_cleanup/sbs_clean` directory. The manifest shall re
 relative source paths and hashes. Existing fixture files remain untouched; no new copy
 of the 11-file source corpus shall be added for this feature.
 
+#### 4.7.10 Automatic and manual cueing
+
+The console shall expose two cue-publication modes:
+
+- **Automatic:** publish each newly committed, eligible prediction that passes the
+  configured gate tests. Periodic recovery snapshots remain enabled in this mode.
+- **Manual:** continue computing and displaying predictions, but publish a track cue
+  only when an operator selects that track in Observer Focus or Track Focus and presses
+  uppercase `Q`. Manual mode shall not publish automatic cue revisions or automatic
+  track snapshots for unselected tracks.
+
+The UI shall display the active cueing mode. A mode change affects publication only; it
+shall not discard existing track state or predictions. A withdrawal is required only for
+the latest revision that was actually published for the relevant track.
+
 ---
 
 ## 5. Existing Application Behavior

@@ -8,7 +8,9 @@ from adsb_console.transforms import (
     KNOT_TO_METERS_PER_SECOND,
     WGS84_A_M,
     closest_point_of_approach,
+    ecef_to_lla,
     ecef_to_enu,
+    enu_to_ecef,
     enu_to_range_az_el,
     horizon_distance_m,
     is_observable_by,
@@ -41,6 +43,25 @@ def test_nearby_east_target_has_east_azimuth() -> None:
     assert enu.east_m > 0.0
     assert isclose(range_az_el.azimuth_deg, 90.0, abs_tol=0.01)
     assert range_az_el.range_m > 1000.0
+
+
+def test_enu_ecef_lla_round_trip_matches_wgs84_reference_vector() -> None:
+    # MATLAB R2026a lla2ecef/ecef2lla round-trip reference: zero error to
+    # displayed precision for this Apple Hill observer location.
+    observer = ObserverConfig(
+        name="apple_hill",
+        role=ObserverRole.LOCAL,
+        latitude_deg=42.299350798761694,
+        longitude_deg=-71.34948267330608,
+        altitude_m=75.0,
+    )
+    target = lla_to_ecef(42.301, -71.347, 1_200.0)
+    enu = ecef_to_enu(target, observer)
+    latitude_deg, longitude_deg, altitude_m = ecef_to_lla(enu_to_ecef(enu, observer))
+
+    assert isclose(latitude_deg, 42.301, abs_tol=1e-8)
+    assert isclose(longitude_deg, -71.347, abs_tol=1e-8)
+    assert isclose(altitude_m, 1_200.0, abs_tol=1e-3)
 
 
 def test_observer_visibility_applies_azimuth_extent() -> None:
