@@ -17,7 +17,7 @@
     "destination_address": "127.0.0.1",
     "destination_port": 31001,
     "source_address": null,
-    "maximum_datagram_bytes": 1200,
+    "maximum_datagram_bytes": 16384,
     "oversize_policy": "omit_history",
     "heartbeat_interval_s": 10,
     "snapshot_interval_s": 60

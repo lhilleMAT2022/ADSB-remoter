@@ -27,7 +27,7 @@ class UdpOutputConfig:
     destination_address: str = "127.0.0.1"
     destination_port: int = 31_001
     source_address: str | None = None
-    maximum_datagram_bytes: int = 1_200
+    maximum_datagram_bytes: int = 16_384
     oversize_policy: str = "omit_history"
     heartbeat_interval_s: float = 10.0
     snapshot_interval_s: float = 60.0
@@ -124,6 +124,7 @@ class CueSerializer:
             "opportunities": [
                 self._opportunity(item, include_history=include_history)
                 for item in prediction.opportunities
+                if item.observer_can_receive and item.emitter_enabled and item.windows
             ],
         }
 

@@ -108,7 +108,7 @@ def load_cue_runtime_config(path: str | Path | None) -> CueRuntimeConfig:
         ),
     )
     maximum_datagram_bytes = int(
-        _positive(udp_values, "maximum_datagram_bytes", 1_200.0)
+        _positive(udp_values, "maximum_datagram_bytes", 16_384.0)
     )
     if maximum_datagram_bytes > 65_507:
         raise ValueError("udp_output.maximum_datagram_bytes must be <= 65507")
