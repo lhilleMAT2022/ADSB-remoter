@@ -60,6 +60,38 @@ def test_constant_velocity_prediction_reuses_current_bistatic_model() -> None:
     assert isclose(samples[0].bistatic_doppler_hz, current.bistatic_doppler_hz or 0.0)
 
 
+def test_historical_reports_are_invalid_until_playback_rebases_timestamps() -> None:
+    recorded_epoch = datetime(2022, 4, 13, 6, 8, 50)
+    live_epoch = datetime(2026, 9, 25, 12, 0, 0)
+    observer = _observer("receiver")
+    config = PredictionConfig(enabled=True, minimum_track_history_s=0.0)
+
+    stale_prediction = build_track_prediction(
+        track=_track(recorded_epoch),
+        reference_origin=observer,
+        observers=[observer],
+        emitters=[_emitter()],
+        config=config,
+        token=PredictionRevisionManager().request("adsb:ABC123"),
+        created_utc=live_epoch,
+        update_reason=PredictionUpdateReason.INITIAL_TRACK,
+    )
+    rebased_prediction = build_track_prediction(
+        track=_track(live_epoch),
+        reference_origin=observer,
+        observers=[observer],
+        emitters=[_emitter()],
+        config=config,
+        token=PredictionRevisionManager().request("adsb:ABC123"),
+        created_utc=live_epoch,
+        update_reason=PredictionUpdateReason.INITIAL_TRACK,
+    )
+
+    assert stale_prediction.state is None
+    assert stale_prediction.maturity is PredictionMaturity.INVALID
+    assert rebased_prediction.state is not None
+
+
 def test_revision_manager_rejects_superseded_async_result() -> None:
     manager = PredictionRevisionManager()
     first = manager.request("adsb:ABC123")

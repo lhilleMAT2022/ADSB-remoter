@@ -6,7 +6,7 @@ import argparse
 import asyncio
 import copy
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from math import isfinite
@@ -403,7 +403,7 @@ class ADSBConsoleApp(App[None]):
         assert self._cue_publisher is not None
         self._cue_publisher.publish_heartbeat(
             active_tracks=len(self.tracker.tracks),
-            cue_eligible_tracks=len(self.predictions),
+            cue_eligible_tracks=len(cue_eligible_predictions(self.predictions.values())),
             active_observers=len(self.observers),
             enabled_emitters=len(self.dtv_emitters),
             last_full_snapshot_utc=self._last_snapshot_utc,
@@ -421,11 +421,7 @@ class ADSBConsoleApp(App[None]):
         if self._cue_publisher is None:
             return
         snapshot_id = f"snapshot:{uuid4()}"
-        predictions = tuple(
-            prediction
-            for prediction in self.predictions.values()
-            if prediction.state is not None
-        )
+        predictions = cue_eligible_predictions(self.predictions.values())
         begin = await asyncio.to_thread(
             self._cue_publisher.publish_snapshot_boundary,
             begin=True,
@@ -1410,6 +1406,19 @@ def refresh_interval_s(refresh_rate_hz: float) -> float:
     if refresh_rate_hz <= 0.0:
         return 0.0
     return 1.0 / refresh_rate_hz
+
+
+def cue_eligible_predictions(
+    predictions: Iterable[TrackPrediction],
+) -> tuple[TrackPrediction, ...]:
+    """Return predictions that can be serialized as track cues.
+
+    Invalid predictions remain available internally so that a later SBS report
+    can regenerate them, but they have no state and therefore cannot be
+    published. Snapshots and heartbeat counts deliberately share this view.
+    """
+
+    return tuple(prediction for prediction in predictions if prediction.state is not None)
 
 
 def next_refresh_interval_s(current_interval_s: float) -> float:
