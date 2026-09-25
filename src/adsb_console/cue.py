@@ -8,6 +8,7 @@ import socket
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from ipaddress import ip_address
 from threading import Lock
 from typing import Literal, cast
 from uuid import uuid4
@@ -352,6 +353,9 @@ class UdpCuePublisher:
         self._sequence = 0
         self._lock = Lock()
         self._socket = udp_socket or socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        if ip_address(config.destination_address).is_multicast:
+            self._socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+            self._socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
         if config.source_address is not None:
             self._socket.bind((config.source_address, 0))
         self.sent_count = 0

@@ -14,8 +14,8 @@
   },
   "udp_output": {
     "enabled": true,
-    "destination_address": "127.0.0.1",
-    "destination_port": 31001,
+    "destination_address": "239.192.10.1",
+    "destination_port": 31986,
     "source_address": null,
     "maximum_datagram_bytes": 16384,
     "oversize_policy": "omit_history",

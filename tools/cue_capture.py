@@ -94,6 +94,8 @@ class SemanticSummary:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bind", default="127.0.0.1:31001")
+    parser.add_argument("--multicast-group")
+    parser.add_argument("--multicast-interface", default="0.0.0.0")
     parser.add_argument("--duration-s", default=60.0, type=float)
     parser.add_argument("--jsonl", default=Path("cue_capture.jsonl"), type=Path)
     parser.add_argument("--summary", default=Path("cue_capture_summary.json"), type=Path)
@@ -104,7 +106,13 @@ def main() -> None:
     summary = SemanticSummary()
     deadline = time.monotonic() + args.duration_s
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     udp_socket.bind((host, int(port_text)))
+    if args.multicast_group:
+        membership = socket.inet_aton(args.multicast_group) + socket.inet_aton(
+            args.multicast_interface
+        )
+        udp_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
     udp_socket.settimeout(min(args.duration_s, 0.5))
     with args.jsonl.open("w", encoding="utf-8") as output:
         while time.monotonic() < deadline:
