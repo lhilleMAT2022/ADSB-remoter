@@ -9,6 +9,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from statistics import median
 from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -24,10 +25,16 @@ class SemanticSummary:
     revisions_by_reason: Counter[str] = field(default_factory=Counter)
     withdrawals: int = 0
     duplicate_message_ids: int = 0
+    sequence_gaps: int = 0
     out_of_order_sequences: int = 0
     stale_revisions: int = 0
     maximum_datagram_bytes: int = 0
     total_datagram_bytes: int = 0
+    track_cue_sizes: list[int] = field(default_factory=list)
+    opportunities_per_cue: list[int] = field(default_factory=list)
+    snapshot_track_cue_counts: Counter[str] = field(default_factory=Counter)
+    snapshot_expected_counts: dict[str, int] = field(default_factory=dict)
+    snapshot_published_counts: dict[str, int] = field(default_factory=dict)
     schema_failures: list[str] = field(default_factory=list)
     _message_ids: set[str] = field(default_factory=set)
     _last_sequence_by_source: dict[str, int] = field(default_factory=dict)
@@ -53,8 +60,17 @@ class SemanticSummary:
         prior_sequence = self._last_sequence_by_source.get(source)
         if prior_sequence is not None and sequence <= prior_sequence:
             self.out_of_order_sequences += 1
+        elif prior_sequence is not None and sequence > prior_sequence + 1:
+            self.sequence_gaps += sequence - prior_sequence - 1
         self._last_sequence_by_source[source] = max(sequence, prior_sequence or sequence)
         if message_type == "track_cue":
+            self.track_cue_sizes.append(len(raw))
+            opportunities = payload.get("opportunities")
+            if isinstance(opportunities, list):
+                self.opportunities_per_cue.append(len(opportunities))
+            snapshot_id = payload.get("snapshot_id")
+            if isinstance(snapshot_id, str):
+                self.snapshot_track_cue_counts[snapshot_id] += 1
             track = payload["track"]
             prediction = payload["prediction"]
             if isinstance(track, dict) and isinstance(prediction, dict):
@@ -68,6 +84,14 @@ class SemanticSummary:
                 self.revisions_by_reason[str(prediction["update_reason"])] += 1
         elif message_type == "track_cue_withdrawal":
             self.withdrawals += 1
+        elif message_type == "cue_snapshot_begin":
+            self.snapshot_expected_counts[str(payload["snapshot_id"])] = int(
+                payload["expected_track_count"]
+            )
+        elif message_type == "cue_snapshot_end":
+            self.snapshot_published_counts[str(payload["snapshot_id"])] = int(
+                payload["published_track_count"]
+            )
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -79,6 +103,7 @@ class SemanticSummary:
             "revisions_by_reason": dict(self.revisions_by_reason),
             "withdrawals": self.withdrawals,
             "duplicate_message_ids": self.duplicate_message_ids,
+            "sequence_gaps": self.sequence_gaps,
             "out_of_order_sequences": self.out_of_order_sequences,
             "stale_revisions": self.stale_revisions,
             "maximum_datagram_bytes": self.maximum_datagram_bytes,
@@ -88,7 +113,30 @@ class SemanticSummary:
                 else self.total_datagram_bytes / self.datagrams_received
             ),
             "schema_failure_count": len(self.schema_failures),
+            "track_cue_size_bytes": _statistics(self.track_cue_sizes),
+            "opportunities_per_track_cue": _statistics(self.opportunities_per_cue),
+            "snapshot_track_cue_consistency": {
+                snapshot_id: {
+                    "expected_track_count": self.snapshot_expected_counts.get(snapshot_id),
+                    "published_track_count": published_count,
+                    "received_track_cue_count": self.snapshot_track_cue_counts[snapshot_id],
+                    "matches_published": (
+                        published_count == self.snapshot_track_cue_counts[snapshot_id]
+                    ),
+                }
+                for snapshot_id, published_count in self.snapshot_published_counts.items()
+            },
         }
+
+
+def _statistics(values: list[int]) -> dict[str, float | int | None]:
+    if not values:
+        return {"minimum": None, "median": None, "maximum": None}
+    return {
+        "minimum": min(values),
+        "median": median(values),
+        "maximum": max(values),
+    }
 
 
 def main() -> None:
