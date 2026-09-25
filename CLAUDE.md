@@ -6,6 +6,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Python 3.13+ ADS-B tooling built around the SBS/BaseStation text protocol (dump1090 port 30003): a Textual TUI (`adsb-console`), a file-replay TCP server (`adsb-playback`), and a TCP→UDP relay (`adsb-relay`). The TUI also estimates passive bistatic radar opportunities using FCC DTV towers as illuminators. Managed with Astral `uv`; entry points are in `pyproject.toml` `[project.scripts]`.
 
+### Purpose: cueing tracks of opportunity for the passive radar
+
+This tool listens to the dump1090 receiver and acts as a **bell ringer**: it flags aircraft entering the airspace that are good passive-radar opportunities and says which DTV illuminators suit them best. The passive bistatic radar collection system in `~/Documents/flightTest-pluto` (MATLAB, USRP N320 SURV/REF receiver at Apple Hill, git remote `pwilliamMAT/flightTest`) handles resource management: it decides when to start a passive track and keeps updating it, using the best illuminator available. Keep that split. This repo produces cues and ranks illuminators; it does not schedule collections or control the radio.
+
+No cue interface to the collection system exists yet. Today the only outbound path is `adsb-relay`, which forwards raw SBS over UDP. `ObserverConfig.report_rate_hz` / `report_method` / `report_endpoint` (INI keys `reportRateHz`, `reportMethod`, `reportEndpoint`) are parsed but not used anywhere; they are the intended hook for sending per-observer reports.
+
+The two systems must agree on these:
+- **Bistatic convention:** `R_excess = R_tx + R_rx − L_baseline` and `f_D = −(fc/c)·dR_excess/dt`, both matching `bistatic_measurement` here. flightTest-pluto enforces the same convention with `bistaticTruthConventionTest.m`, so don't let them drift apart.
+- **DTV emitter table:** `20_DTV_direct_path_input.csv` is also kept at `flightTest-pluto/TestSetupTesting/siteData/`.
+- **Receive site:** the geometry and antenna pointing are documented in `flightTest-pluto/TestSetupTesting/SiteGeometry.md`.
+- **Pi ADS-B feed:** the Pi at `192.168.10.131` also runs the collection system's truth logger (`ADSB_GPS/gatherTCPcompress.py`).
+
 The README has PowerShell examples (the original Windows workstation), but the current dev/deployment host is Ubuntu 24. The live feed is a Raspberry Pi at `192.168.10.131:30003`.
 
 ## Commands
