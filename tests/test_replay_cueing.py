@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -17,6 +18,7 @@ from adsb_console.prediction import (
     PredictionRevisionManager,
     PredictionUpdateReason,
     build_track_prediction,
+    observer_id,
 )
 from adsb_console.tracker import BaseStationTracker
 
@@ -56,16 +58,45 @@ def test_startup_replay_partition_produces_schema_valid_cue() -> None:
         altitude_m=350.0,
         eirp_kw=1_000.0,
     )
+    second_observer = replace(
+        observer,
+        name="replay_observer_two",
+        latitude_deg=42.292,
+        longitude_deg=-71.325,
+    )
+    emitters = (
+        emitter,
+        replace(
+            emitter,
+            facility_id="replay-two",
+            call_sign="WTEST2",
+            rf_channel=21,
+            center_frequency_mhz=515.0,
+        ),
+        replace(
+            emitter,
+            facility_id="replay-three",
+            call_sign="WTEST3",
+            rf_channel=22,
+            center_frequency_mhz=521.0,
+        ),
+    )
     prediction = build_track_prediction(
         track=track,
         reference_origin=observer,
-        observers=[observer],
-        emitters=[emitter],
+        observers=[observer, second_observer],
+        emitters=emitters,
         config=PredictionConfig(
             enabled=True,
             prediction_horizon_s=30.0,
             prediction_sample_interval_s=10.0,
             minimum_track_history_s=0.0,
+            detection_threshold_db=-100.0,
+            receiver_compatible_emitter_ids={
+                observer_id(second_observer): frozenset(
+                    {emitters[0].emitter_id, emitters[1].emitter_id}
+                )
+            },
         ),
         token=PredictionRevisionManager().request(f"adsb:{track.icao}"),
         created_utc=track.last_seen,
@@ -82,7 +113,10 @@ def test_startup_replay_partition_produces_schema_valid_cue() -> None:
     schema_path = Path(__file__).parents[1] / "schemas" / "track-cue-1.1.0.json"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
-    assert prediction.opportunities
+    assert len(prediction.opportunities) == 6
+    opportunities = payload["opportunities"]
+    assert isinstance(opportunities, list)
+    assert len(cast(list[object], opportunities)) == 5
     validator: Any = Draft202012Validator(schema, format_checker=FormatChecker())
     assert not list(validator.iter_errors(payload))
 
