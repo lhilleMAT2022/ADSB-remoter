@@ -27,7 +27,7 @@ from adsb_console.bistatic import (
     top_bistatic_measurements,
 )
 from adsb_console.config import load_observers_or_default, parse_endpoint
-from adsb_console.cue import UdpCuePublisher
+from adsb_console.cue import CueHeartbeatStatus, UdpCuePublisher
 from adsb_console.cue_config import CuePublicationMode, CueRuntimeConfig, load_cue_runtime_config
 from adsb_console.models import ObserverConfig, PositionReport, TrackState, VelocityReport, utc_now
 from adsb_console.prediction import (
@@ -238,6 +238,10 @@ class ADSBConsoleApp(App[None]):
         self.event_log: RichLog | None = None
         self.bisnr_breakdown: Static | None = None
         self._last_snapshot_utc: datetime | None = None
+        self._last_sbs_input_utc: datetime | None = None
+        self._has_published_heartbeat = False
+        self._last_publisher_failure_count = 0
+        self._last_publisher_oversize_count = 0
         self._published_cue_revisions: dict[str, int] = {}
 
     def compose(self) -> ComposeResult:
@@ -284,6 +288,9 @@ class ADSBConsoleApp(App[None]):
 
     def on_unmount(self) -> None:
         if self._cue_publisher is not None:
+            # A normal Textual unmount is this application's clean-shutdown
+            # path, so announce it before the UDP socket is closed.
+            self._publish_heartbeat(stopping=True)
             self._cue_publisher.close()
 
     async def _monitor_source(self) -> None:
@@ -306,6 +313,7 @@ class ADSBConsoleApp(App[None]):
                     self._write_log("[yellow]Source closed connection[/]")
                     return
                 decoded = line.decode(errors="replace").rstrip("\r\n")
+                self._last_sbs_input_utc = self._event_clock()
                 track = self.tracker.update_line(decoded)
                 if track is not None:
                     self.last_track_icao = track.icao
@@ -401,15 +409,35 @@ class ADSBConsoleApp(App[None]):
             return
         self.run_worker(asyncio.to_thread(self._publish_heartbeat), name="cue-heartbeat")
 
-    def _publish_heartbeat(self) -> None:
+    def _publish_heartbeat(self, *, stopping: bool = False) -> None:
         assert self._cue_publisher is not None
-        self._cue_publisher.publish_heartbeat(
+        status = cue_heartbeat_status(
+            has_published_heartbeat=self._has_published_heartbeat,
+            stopping=stopping,
+            last_sbs_input_utc=self._last_sbs_input_utc,
+            now=self._event_clock(),
+            maximum_adsb_report_age_s=(
+                self.cue_runtime_config.prediction.maximum_adsb_report_age_s
+            ),
+            recent_publish_failure=(
+                self._cue_publisher.failure_count > self._last_publisher_failure_count
+            ),
+            recent_oversize=(
+                self._cue_publisher.oversize_count > self._last_publisher_oversize_count
+            ),
+        )
+        result = self._cue_publisher.publish_heartbeat(
             active_tracks=len(self.tracker.tracks),
             cue_eligible_tracks=len(cue_eligible_predictions(self.predictions.values())),
             active_observers=len(self.observers),
             enabled_emitters=len(self.dtv_emitters),
             last_full_snapshot_utc=self._last_snapshot_utc,
+            status=status,
         )
+        self._last_publisher_failure_count = self._cue_publisher.failure_count
+        self._last_publisher_oversize_count = self._cue_publisher.oversize_count
+        if result is not None and not stopping:
+            self._has_published_heartbeat = True
 
     def _schedule_snapshot(self) -> None:
         if (
@@ -1421,6 +1449,36 @@ def cue_eligible_predictions(
     """
 
     return tuple(prediction for prediction in predictions if prediction.state is not None)
+
+
+def cue_heartbeat_status(
+    *,
+    has_published_heartbeat: bool,
+    stopping: bool,
+    last_sbs_input_utc: datetime | None,
+    now: datetime,
+    maximum_adsb_report_age_s: float,
+    recent_publish_failure: bool,
+    recent_oversize: bool,
+) -> CueHeartbeatStatus:
+    """Return CT health from the latest feed and publisher activity.
+
+    The first successfully sent heartbeat reports startup. Thereafter CT is
+    degraded only for a stale SBS feed or a new publisher failure/oversize
+    since the prior heartbeat; a clean unmount always reports stopping.
+    """
+
+    if stopping:
+        return "stopping"
+    if not has_published_heartbeat:
+        return "starting"
+    feed_stale = (
+        last_sbs_input_utc is None
+        or (now - last_sbs_input_utc).total_seconds() > maximum_adsb_report_age_s
+    )
+    if feed_stale or recent_publish_failure or recent_oversize:
+        return "degraded"
+    return "running"
 
 
 def next_refresh_interval_s(current_interval_s: float) -> float:

@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import Lock
-from typing import cast
+from typing import Literal, cast
 from uuid import uuid4
 
 from adsb_console.prediction import (
@@ -22,6 +22,7 @@ from adsb_console.prediction import (
 SCHEMA_VERSION = "1.1.0"
 SOURCE_NAME = "ADSBConsoleApp"
 LOGGER = logging.getLogger(__name__)
+CueHeartbeatStatus = Literal["starting", "running", "degraded", "stopping"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +175,7 @@ class CueSerializer:
         enabled_emitters: int,
         udp_destination: str | None,
         last_full_snapshot_utc: datetime | None,
+        status: CueHeartbeatStatus,
     ) -> dict[str, object]:
         return {
             "schema_version": SCHEMA_VERSION,
@@ -183,7 +185,7 @@ class CueSerializer:
             "source_instance_id": source_instance_id,
             "sequence_number": sequence_number,
             "generated_utc": _iso_utc(generated_utc),
-            "status": "running",
+            "status": status,
             "active_tracks": active_tracks,
             "cue_eligible_tracks": cue_eligible_tracks,
             "active_observers": active_observers,
@@ -403,6 +405,7 @@ class UdpCuePublisher:
         active_observers: int,
         enabled_emitters: int,
         last_full_snapshot_utc: datetime | None,
+        status: CueHeartbeatStatus,
     ) -> PublicationResult | None:
         destination = f"{self.config.destination_address}:{self.config.destination_port}"
         return self._publish(
@@ -417,6 +420,7 @@ class UdpCuePublisher:
                 enabled_emitters=enabled_emitters,
                 udp_destination=destination,
                 last_full_snapshot_utc=last_full_snapshot_utc,
+                status=status,
             )
         )
 

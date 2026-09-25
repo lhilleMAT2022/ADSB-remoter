@@ -263,6 +263,7 @@ def test_udp_publisher_serializes_sequences_and_snapshot_messages() -> None:
         active_observers=1,
         enabled_emitters=1,
         last_full_snapshot_utc=datetime(2025, 1, 1, tzinfo=UTC),
+        status="running",
     )
 
     payloads = [json.loads(item) for item in capture.payloads]

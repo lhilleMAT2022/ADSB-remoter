@@ -10,6 +10,7 @@ from adsb_console.app import (
     TrackFocusSnapshot,
     bisnr_breakdown_table,
     bistatic_tower_log_table,
+    cue_heartbeat_status,
     filter_display_tracks,
     main_display_bistatic_by_icao,
     next_refresh_interval_s,
@@ -36,6 +37,64 @@ def test_manual_cue_and_mode_bindings_preserve_lowercase_quit() -> None:
     assert bindings["q"] == "quit"
     assert bindings["shift+q"] == "publish_selected_cue"
     assert bindings["m"] == "toggle_cue_mode"
+
+
+def test_cue_heartbeat_status_tracks_startup_health_and_shutdown() -> None:
+    now = datetime(2026, 9, 25, 18, 0, 0)
+    assert cue_heartbeat_status(
+        has_published_heartbeat=False,
+        stopping=False,
+        last_sbs_input_utc=now,
+        now=now,
+        maximum_adsb_report_age_s=20.0,
+        recent_publish_failure=False,
+        recent_oversize=False,
+    ) == "starting"
+    assert cue_heartbeat_status(
+        has_published_heartbeat=True,
+        stopping=False,
+        last_sbs_input_utc=now,
+        now=now,
+        maximum_adsb_report_age_s=20.0,
+        recent_publish_failure=False,
+        recent_oversize=False,
+    ) == "running"
+    assert cue_heartbeat_status(
+        has_published_heartbeat=True,
+        stopping=False,
+        last_sbs_input_utc=now - timedelta(seconds=21),
+        now=now,
+        maximum_adsb_report_age_s=20.0,
+        recent_publish_failure=False,
+        recent_oversize=False,
+    ) == "degraded"
+    assert cue_heartbeat_status(
+        has_published_heartbeat=True,
+        stopping=False,
+        last_sbs_input_utc=now,
+        now=now,
+        maximum_adsb_report_age_s=20.0,
+        recent_publish_failure=True,
+        recent_oversize=False,
+    ) == "degraded"
+    assert cue_heartbeat_status(
+        has_published_heartbeat=True,
+        stopping=False,
+        last_sbs_input_utc=now,
+        now=now,
+        maximum_adsb_report_age_s=20.0,
+        recent_publish_failure=False,
+        recent_oversize=True,
+    ) == "degraded"
+    assert cue_heartbeat_status(
+        has_published_heartbeat=True,
+        stopping=True,
+        last_sbs_input_utc=now,
+        now=now,
+        maximum_adsb_report_age_s=20.0,
+        recent_publish_failure=False,
+        recent_oversize=False,
+    ) == "stopping"
 
 
 def test_app_constructs_without_textual_attribute_collisions() -> None:
