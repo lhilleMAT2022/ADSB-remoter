@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://passive-radar.local/schemas/cue-snapshot-end-1.1.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "message_type", "message_id", "source", "source_instance_id",
+    "sequence_number", "generated_utc", "snapshot_id",
+    "published_track_count", "failed_track_count"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.1.0" },
+    "message_type": { "const": "cue_snapshot_end" },
+    "message_id": { "type": "string", "format": "uuid" },
+    "source": { "const": "ADSBConsoleApp" },
+    "source_instance_id": { "type": "string", "minLength": 1 },
+    "sequence_number": { "type": "integer", "minimum": 1 },
+    "generated_utc": { "type": "string", "format": "date-time" },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "published_track_count": { "type": "integer", "minimum": 0 },
+    "failed_track_count": { "type": "integer", "minimum": 0 }
+  }
+}

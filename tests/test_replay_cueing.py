@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -78,11 +79,12 @@ def test_startup_replay_partition_produces_schema_valid_cue() -> None:
         generated_utc=track.last_seen,
         include_history=False,
     )
-    schema_path = Path(__file__).parents[1] / "schemas" / "track-cue-1.0.0.json"
+    schema_path = Path(__file__).parents[1] / "schemas" / "track-cue-1.1.0.json"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
     assert prediction.opportunities
-    assert not list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(payload))
+    validator: Any = Draft202012Validator(schema, format_checker=FormatChecker())
+    assert not list(validator.iter_errors(payload))
 
 
 async def _first_eligible_track(source: Path):
@@ -95,6 +97,10 @@ async def _first_eligible_track(source: Path):
     )
     async for message in replay_messages(config):
         track = tracker.update(message)
-        if track is not None and track.last_position is not None and track.last_velocity is not None:
+        if (
+            track is not None
+            and track.last_position is not None
+            and track.last_velocity is not None
+        ):
             return track
     return None

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import socket
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import Lock
+from typing import cast
 from uuid import uuid4
 
 from adsb_console.prediction import (
@@ -17,8 +19,9 @@ from adsb_console.prediction import (
     TrackPrediction,
 )
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 SOURCE_NAME = "ADSBConsoleApp"
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,9 +119,13 @@ class CueSerializer:
                     "position_error_m": prediction.validation.position_error_m,
                     "position_error_threshold_m": prediction.validation.position_error_threshold_m,
                     "velocity_error_mps": prediction.validation.velocity_error_mps,
-                    "velocity_error_threshold_mps": prediction.validation.velocity_error_threshold_mps,
+                    "velocity_error_threshold_mps": (
+                        prediction.validation.velocity_error_threshold_mps
+                    ),
                     "heading_change_deg": prediction.validation.heading_change_deg,
-                    "heading_change_threshold_deg": prediction.validation.heading_change_threshold_deg,
+                    "heading_change_threshold_deg": (
+                        prediction.validation.heading_change_threshold_deg
+                    ),
                 },
             },
             "opportunities": [
@@ -180,7 +187,6 @@ class CueSerializer:
             "active_tracks": active_tracks,
             "cue_eligible_tracks": cue_eligible_tracks,
             "active_observers": active_observers,
-            "implemented_observers": active_observers,
             "enabled_emitters": enabled_emitters,
             "udp_destination": udp_destination,
             "last_full_snapshot_utc": (
@@ -219,7 +225,9 @@ class CueSerializer:
         return payload
 
     def to_json_bytes(self, payload: dict[str, object]) -> bytes:
-        return json.dumps(payload, allow_nan=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        return json.dumps(
+            payload, allow_nan=False, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
 
     def _opportunity(
         self, opportunity: ObservationOpportunity, *, include_history: bool
@@ -227,7 +235,9 @@ class CueSerializer:
         samples = opportunity.samples
         current = opportunity.current
         windows = [self._window(item) for item in opportunity.windows]
-        max_snr_sample = max(samples, key=lambda item: item.predicted_bistatic_snr_db) if samples else None
+        max_snr_sample = (
+            max(samples, key=lambda item: item.predicted_bistatic_snr_db) if samples else None
+        )
         return {
             "opportunity_id": (
                 f"{opportunity.observer_id}:{opportunity.emitter_id}"
@@ -237,7 +247,7 @@ class CueSerializer:
             "emitter_id": opportunity.emitter_id,
             "transmitter_site_id": opportunity.transmitter_site_id,
             "carrier_frequency_hz": opportunity.emitter.center_frequency_mhz * 1_000_000.0,
-            "rf_channel": opportunity.emitter.rf_channel,
+            "rf_channel": _rf_channel_or_none(opportunity.emitter.rf_channel),
             "emitter_enabled": opportunity.emitter_enabled,
             "observer_can_receive": opportunity.observer_can_receive,
             "models": {
@@ -452,9 +462,11 @@ class UdpCuePublisher:
                 self.oversize_count += 1
                 if retry_without_history and self.config.oversize_policy == "omit_history":
                     payload = make_payload(sequence, message_id, self._clock())
-                    for opportunity in payload.get("opportunities", []):
-                        if isinstance(opportunity, dict):
-                            opportunity["history"] = None
+                    opportunities = payload.get("opportunities")
+                    if isinstance(opportunities, list):
+                        for opportunity in cast(list[object], opportunities):
+                            if isinstance(opportunity, dict):
+                                opportunity["history"] = None
                     encoded = self.serializer.to_json_bytes(payload)
                     omitted_history = True
                 if len(encoded) > self.config.maximum_datagram_bytes:
@@ -489,3 +501,23 @@ def _seconds_between(later: datetime, earlier: datetime) -> float:
     if earlier.tzinfo is None:
         earlier = earlier.replace(tzinfo=UTC)
     return (later.astimezone(UTC) - earlier.astimezone(UTC)).total_seconds()
+
+
+def _rf_channel_or_none(value: object) -> int | None:
+    """Normalize source CSV channel values to the frozen wire contract."""
+
+    if isinstance(value, bool):
+        channel = None
+    elif isinstance(value, int):
+        channel = value
+    elif isinstance(value, str):
+        try:
+            channel = int(value.strip())
+        except ValueError:
+            channel = None
+    else:
+        channel = None
+    if channel is not None and 2 <= channel <= 69:
+        return channel
+    LOGGER.warning("Cue emitter has invalid RF channel %r; publishing null", value)
+    return None

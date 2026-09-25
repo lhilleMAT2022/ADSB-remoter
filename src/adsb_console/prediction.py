@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from itertools import pairwise
 from math import cos, log10, radians
-import re
 
 from adsb_console.bistatic import (
     DEFAULT_POLARIZATION_LOSS_DB,
@@ -20,11 +21,11 @@ from adsb_console.models import ObserverConfig, PositionReport, TrackState, Velo
 from adsb_console.transforms import (
     EnuPoint,
     EnuVector,
+    enu_to_position,
     is_observable_by,
     position_to_enu,
     position_to_range_az_el,
     velocity_to_observer_enu,
-    enu_to_position,
 )
 
 
@@ -86,7 +87,9 @@ class PredictionConfig:
     system_loss_db: float = DEFAULT_SYSTEM_LOSS_DB
     disabled_observer_ids: frozenset[str] = frozenset()
     disabled_emitter_ids: frozenset[str] = frozenset()
-    receiver_compatible_emitter_ids: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    receiver_compatible_emitter_ids: Mapping[str, frozenset[str]] = field(
+        default_factory=dict[str, frozenset[str]]
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,7 +300,10 @@ class PredictionTriggerEvaluator:
             heading_change_threshold_deg=self._config.maneuver_heading_change_deg,
         )
         maneuver = (
-            (heading_change_deg is not None and heading_change_deg >= self._config.maneuver_heading_change_deg)
+            (
+                heading_change_deg is not None
+                and heading_change_deg >= self._config.maneuver_heading_change_deg
+            )
             or (
                 velocity_error_mps is not None
                 and velocity_error_mps >= self._config.maneuver_speed_change_mps
@@ -360,11 +366,12 @@ def build_track_prediction(
     token: PredictionToken,
     created_utc: datetime,
     update_reason: PredictionUpdateReason,
-    validation: PredictionValidation = PredictionValidation(),
+    validation: PredictionValidation | None = None,
 ) -> TrackPrediction:
     """Build a deterministic constant-velocity prediction without UI dependencies."""
 
     created_utc = _naive_utc(created_utc)
+    validation = validation or PredictionValidation()
     prediction_id = f"{track_id(track)}:r{token.revision}"
     invalid_until = created_utc + timedelta(seconds=config.prediction_horizon_s)
     if not _is_eligible(track, created_utc, config):
@@ -394,7 +401,8 @@ def build_track_prediction(
     velocity_enu = velocity_to_observer_enu(
         track.last_position, track.last_velocity, reference_origin
     )
-    vertical_rate_assumed = track.last_velocity.vertical_rate_fpm is None
+    vertical_rate_fpm = track.last_velocity.vertical_rate_fpm
+    vertical_rate_assumed = vertical_rate_fpm is None
     state = PredictedTrackState(
         epoch_utc=epoch,
         reference_origin_id=observer_id(reference_origin),
@@ -408,11 +416,13 @@ def build_track_prediction(
         vertical_rate_mps=(
             None
             if vertical_rate_assumed
-            else track.last_velocity.vertical_rate_fpm * 0.00508
+            else vertical_rate_fpm * 0.00508
         ),
         vertical_rate_assumed=vertical_rate_assumed,
     )
-    samples_times = _sample_offsets(config.prediction_horizon_s, config.prediction_sample_interval_s)
+    samples_times = _sample_offsets(
+        config.prediction_horizon_s, config.prediction_sample_interval_s
+    )
     opportunities = tuple(
         _predict_opportunity(
             state=state,
@@ -565,14 +575,16 @@ def _extract_windows(
 def _window_from_samples(
     samples: tuple[ObservationSample, ...], entry_reason: str, exit_reason: str
 ) -> ObservationWindow:
-    snr_linear_mean = sum(10.0 ** (sample.predicted_bistatic_snr_db / 10.0) for sample in samples) / len(samples)
+    snr_linear_mean = sum(
+        10.0 ** (sample.predicted_bistatic_snr_db / 10.0) for sample in samples
+    ) / len(samples)
     peak = max(samples, key=lambda item: item.predicted_bistatic_snr_db)
     doppler_rates = [
         abs(
             (right.bistatic_doppler_hz - left.bistatic_doppler_hz)
             / max(right.time_offset_s - left.time_offset_s, 1e-12)
         )
-        for left, right in zip(samples, samples[1:], strict=False)
+        for left, right in pairwise(samples)
     ]
     return ObservationWindow(
         start_utc=samples[0].sample_utc,
@@ -605,10 +617,10 @@ def _transition_reason(
         ("doppler_limit", previous.within_doppler_limits, current.within_doppler_limits),
         ("snr_threshold", previous.above_snr_threshold, current.above_snr_threshold),
     )
-    expected = True if entering else False
+    expected = bool(entering)
     for name, before, after in checks:
         if after == expected and before != after:
-            return f"{'entry' if entering else 'exit'}_{name}"
+            return name
     return "state_transition"
 
 
@@ -642,32 +654,36 @@ def _continuous_crossing_fraction(
 ) -> float | None:
     candidates: list[float] = []
     if before.above_snr_threshold != after.above_snr_threshold:
-        candidates.append(
-            _threshold_fraction(
-                before.predicted_bistatic_snr_db, after.predicted_bistatic_snr_db, config.detection_threshold_db
-            )
+        fraction = _threshold_fraction(
+            before.predicted_bistatic_snr_db,
+            after.predicted_bistatic_snr_db,
+            config.detection_threshold_db,
         )
+        if fraction is not None:
+            candidates.append(fraction)
     if (
         config.maximum_bistatic_range_m is not None
         and before.within_range_limits != after.within_range_limits
     ):
-        candidates.append(
-            _threshold_fraction(
-                before.bistatic_range_m, after.bistatic_range_m, config.maximum_bistatic_range_m
-            )
+        fraction = _threshold_fraction(
+            before.bistatic_range_m,
+            after.bistatic_range_m,
+            config.maximum_bistatic_range_m,
         )
+        if fraction is not None:
+            candidates.append(fraction)
     if (
         config.maximum_abs_bistatic_doppler_hz is not None
         and before.within_doppler_limits != after.within_doppler_limits
     ):
-        candidates.append(
-            _threshold_fraction(
-                abs(before.bistatic_doppler_hz),
-                abs(after.bistatic_doppler_hz),
-                config.maximum_abs_bistatic_doppler_hz,
-            )
+        fraction = _threshold_fraction(
+            abs(before.bistatic_doppler_hz),
+            abs(after.bistatic_doppler_hz),
+            config.maximum_abs_bistatic_doppler_hz,
         )
-    return min((item for item in candidates if item is not None), default=None)
+        if fraction is not None:
+            candidates.append(fraction)
+    return min(candidates, default=None)
 
 
 def _threshold_fraction(start: float, end: float, threshold: float) -> float | None:
@@ -792,7 +808,9 @@ def _heading_difference(first_deg: float | None, second_deg: float | None) -> fl
 
 
 def _enu_norm(point: EnuPoint) -> float:
-    return (point.east_m * point.east_m + point.north_m * point.north_m + point.up_m * point.up_m) ** 0.5
+    return (
+        point.east_m * point.east_m + point.north_m * point.north_m + point.up_m * point.up_m
+    ) ** 0.5
 
 
 def _seconds_between(later: datetime, earlier: datetime) -> float:

@@ -4,7 +4,13 @@ from datetime import datetime, timedelta
 from math import isclose
 
 from adsb_console.bistatic import DtvEmitter, bistatic_measurement
-from adsb_console.models import ObserverConfig, ObserverRole, PositionReport, TrackState, VelocityReport
+from adsb_console.models import (
+    ObserverConfig,
+    ObserverRole,
+    PositionReport,
+    TrackState,
+    VelocityReport,
+)
 from adsb_console.prediction import (
     PredictionConfig,
     PredictionMaturity,
@@ -45,6 +51,8 @@ def test_constant_velocity_prediction_reuses_current_bistatic_model() -> None:
     assert len(prediction.opportunities) == 1
     samples = prediction.opportunities[0].samples
     assert [sample.time_offset_s for sample in samples] == [0.0, 10.0, 20.0]
+    assert track.last_position is not None
+    assert track.last_velocity is not None
     current = bistatic_measurement(
         emitter=emitter,
         receiver=observer,

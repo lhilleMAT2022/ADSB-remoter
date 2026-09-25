@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://passive-radar.local/schemas/track-cue-1.1.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "message_type", "message_id", "source",
+    "source_instance_id", "sequence_number", "generated_utc",
+    "snapshot_id", "track", "prediction", "opportunities"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.1.0" },
+    "message_type": { "const": "track_cue" },
+    "message_id": { "type": "string", "format": "uuid" },
+    "source": { "const": "ADSBConsoleApp" },
+    "source_instance_id": { "type": "string", "minLength": 1 },
+    "sequence_number": { "type": "integer", "minimum": 1 },
+    "generated_utc": { "type": "string", "format": "date-time" },
+    "snapshot_id": { "type": ["string", "null"] },
+    "track": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["track_id", "icao", "status", "last_report_utc", "report_age_s", "state"],
+      "properties": {
+        "track_id": { "type": "string", "minLength": 1 },
+        "icao": { "type": "string", "pattern": "^[0-9A-F]{6}$" },
+        "callsign": { "type": ["string", "null"] },
+        "status": { "enum": ["active", "stale", "purged", "invalid"] },
+        "last_report_utc": { "type": "string", "format": "date-time" },
+        "report_age_s": { "type": "number", "minimum": 0 },
+        "state": { "$ref": "#/$defs/state" }
+      }
+    },
+    "prediction": { "$ref": "#/$defs/prediction" },
+    "opportunities": { "type": "array", "items": { "$ref": "#/$defs/opportunity" } }
+  },
+  "$defs": {
+    "numberOrNull": { "type": ["number", "null"] },
+    "utcOrNull": { "type": ["string", "null"], "format": "date-time" },
+    "vector3": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "epoch_utc", "reference_frame", "reference_origin_id", "position_enu_m",
+        "velocity_enu_mps", "latitude_deg", "longitude_deg", "altitude_m_msl"
+      ],
+      "properties": {
+        "epoch_utc": { "type": "string", "format": "date-time" },
+        "reference_frame": { "const": "ENU" },
+        "reference_origin_id": { "type": "string", "minLength": 1 },
+        "position_enu_m": { "$ref": "#/$defs/vector3" },
+        "velocity_enu_mps": { "$ref": "#/$defs/vector3" },
+        "latitude_deg": { "type": "number", "minimum": -90, "maximum": 90 },
+        "longitude_deg": { "type": "number", "minimum": -180, "maximum": 180 },
+        "altitude_m_msl": { "type": "number" },
+        "ground_speed_mps": { "$ref": "#/$defs/numberOrNull" },
+        "track_angle_deg": { "$ref": "#/$defs/numberOrNull" },
+        "vertical_rate_mps": { "$ref": "#/$defs/numberOrNull" },
+        "quality": { "$ref": "#/$defs/quality" }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vertical_rate_assumed", "horizontal_velocity_estimated",
+        "position_valid", "velocity_valid"
+      ],
+      "properties": {
+        "vertical_rate_assumed": { "type": "boolean" },
+        "horizontal_velocity_estimated": { "type": "boolean" },
+        "position_valid": { "type": "boolean" },
+        "velocity_valid": { "type": "boolean" }
+      }
+    },
+    "prediction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prediction_id", "revision", "created_utc", "valid_until_utc", "horizon_s",
+        "sample_interval_s", "motion_model", "maturity", "update_reason", "validation"
+      ],
+      "properties": {
+        "prediction_id": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "created_utc": { "type": "string", "format": "date-time" },
+        "valid_until_utc": { "type": "string", "format": "date-time" },
+        "horizon_s": { "type": "number", "exclusiveMinimum": 0 },
+        "sample_interval_s": { "type": "number", "exclusiveMinimum": 0 },
+        "motion_model": { "const": "constant_velocity_enu" },
+        "maturity": { "enum": ["initial", "stabilizing", "stable", "invalid"] },
+        "update_reason": {
+          "enum": [
+            "initial_track", "track_maneuver", "prediction_error", "periodic_refresh",
+            "observer_configuration_change", "emitter_configuration_change",
+            "application_snapshot"
+          ]
+        },
+        "validation": { "$ref": "#/$defs/validation" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position_error_m", "position_error_threshold_m",
+        "velocity_error_mps", "velocity_error_threshold_mps",
+        "heading_change_deg", "heading_change_threshold_deg"
+      ],
+      "properties": {
+        "position_error_m": { "$ref": "#/$defs/numberOrNull" },
+        "position_error_threshold_m": { "$ref": "#/$defs/numberOrNull" },
+        "velocity_error_mps": { "$ref": "#/$defs/numberOrNull" },
+        "velocity_error_threshold_mps": { "$ref": "#/$defs/numberOrNull" },
+        "heading_change_deg": { "$ref": "#/$defs/numberOrNull" },
+        "heading_change_threshold_deg": { "$ref": "#/$defs/numberOrNull" }
+      }
+    },
+    "opportunity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "opportunity_id", "observer_id", "observer_name", "emitter_id",
+        "transmitter_site_id", "carrier_frequency_hz", "emitter_enabled",
+        "observer_can_receive", "models", "current", "summary", "windows", "history"
+      ],
+      "properties": {
+        "opportunity_id": { "type": "string", "minLength": 1 },
+        "observer_id": { "type": "string", "minLength": 1 },
+        "observer_name": { "type": "string", "minLength": 1 },
+        "emitter_id": { "type": "string", "minLength": 1 },
+        "transmitter_site_id": { "type": "string", "minLength": 1 },
+        "carrier_frequency_hz": { "type": "number", "exclusiveMinimum": 0 },
+        "rf_channel": { "type": ["integer", "null"], "minimum": 2, "maximum": 69 },
+        "emitter_enabled": { "type": "boolean" },
+        "observer_can_receive": { "type": "boolean" },
+        "models": { "$ref": "#/$defs/models" },
+        "current": {
+          "oneOf": [{ "$ref": "#/$defs/sample" }, { "type": "null" }]
+        },
+        "summary": { "$ref": "#/$defs/summary" },
+        "windows": { "type": "array", "items": { "$ref": "#/$defs/window" } },
+        "history": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/$defs/sample" }
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bistatic_range_definition", "doppler_source", "doppler_sign_convention",
+        "snr_model_id", "assumed_rcs_dbsm", "detection_threshold_db"
+      ],
+      "properties": {
+        "bistatic_range_definition": {
+          "const": "tx_target_plus_target_rx_minus_tx_rx"
+        },
+        "doppler_source": {
+          "const": "analytic_derivative_of_bistatic_range"
+        },
+        "doppler_sign_convention": {
+          "const": "positive_for_decreasing_bistatic_path"
+        },
+        "snr_model_id": { "type": "string", "minLength": 1 },
+        "assumed_rcs_dbsm": { "type": "number" },
+        "detection_threshold_db": { "type": "number" }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "time_offset_s", "sample_utc", "bistatic_range_m", "bistatic_range_rate_mps",
+        "bistatic_doppler_hz", "predicted_bistatic_snr_db", "geometrically_visible",
+        "rf_available", "within_range_limits", "within_doppler_limits",
+        "above_snr_threshold", "usable"
+      ],
+      "properties": {
+        "time_offset_s": { "type": "number" },
+        "sample_utc": { "type": "string", "format": "date-time" },
+        "bistatic_range_m": { "type": "number", "minimum": 0 },
+        "bistatic_range_rate_mps": { "type": "number" },
+        "bistatic_doppler_hz": { "type": "number" },
+        "predicted_bistatic_snr_db": { "type": "number" },
+        "geometrically_visible": { "type": "boolean" },
+        "rf_available": { "type": "boolean" },
+        "within_range_limits": { "type": "boolean" },
+        "within_doppler_limits": { "type": "boolean" },
+        "above_snr_threshold": { "type": "boolean" },
+        "usable": { "type": "boolean" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "has_usable_window", "next_window_start_utc", "next_window_end_utc",
+        "total_usable_duration_s", "maximum_snr_db", "maximum_snr_utc",
+        "minimum_bistatic_range_m", "maximum_bistatic_range_m",
+        "minimum_bistatic_doppler_hz", "maximum_bistatic_doppler_hz"
+      ],
+      "properties": {
+        "has_usable_window": { "type": "boolean" },
+        "next_window_start_utc": { "$ref": "#/$defs/utcOrNull" },
+        "next_window_end_utc": { "$ref": "#/$defs/utcOrNull" },
+        "total_usable_duration_s": { "type": "number", "minimum": 0 },
+        "maximum_snr_db": { "$ref": "#/$defs/numberOrNull" },
+        "maximum_snr_utc": { "$ref": "#/$defs/utcOrNull" },
+        "minimum_bistatic_range_m": { "$ref": "#/$defs/numberOrNull" },
+        "maximum_bistatic_range_m": { "$ref": "#/$defs/numberOrNull" },
+        "minimum_bistatic_doppler_hz": { "$ref": "#/$defs/numberOrNull" },
+        "maximum_bistatic_doppler_hz": { "$ref": "#/$defs/numberOrNull" }
+      }
+    },
+    "windowReason": {
+      "enum": [
+        "prediction_start_inside_usable", "prediction_horizon", "geometric_visibility",
+        "rf_availability", "bistatic_range_limit", "doppler_limit", "snr_threshold",
+        "state_transition"
+      ]
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "window_id", "start_utc", "end_utc", "duration_s", "entry_reason", "exit_reason",
+        "min_bistatic_range_m", "max_bistatic_range_m",
+        "min_bistatic_range_rate_mps", "max_bistatic_range_rate_mps",
+        "min_bistatic_doppler_hz", "max_bistatic_doppler_hz",
+        "maximum_abs_doppler_rate_hzps", "min_snr_db", "mean_snr_db", "max_snr_db",
+        "peak_snr_utc"
+      ],
+      "properties": {
+        "window_id": { "type": "string", "minLength": 1 },
+        "start_utc": { "type": "string", "format": "date-time" },
+        "end_utc": { "type": "string", "format": "date-time" },
+        "duration_s": { "type": "number", "minimum": 0 },
+        "entry_reason": { "$ref": "#/$defs/windowReason" },
+        "exit_reason": { "$ref": "#/$defs/windowReason" },
+        "min_bistatic_range_m": { "type": "number" },
+        "max_bistatic_range_m": { "type": "number" },
+        "min_bistatic_range_rate_mps": { "type": "number" },
+        "max_bistatic_range_rate_mps": { "type": "number" },
+        "min_bistatic_doppler_hz": { "type": "number" },
+        "max_bistatic_doppler_hz": { "type": "number" },
+        "maximum_abs_doppler_rate_hzps": { "type": "number", "minimum": 0 },
+        "min_snr_db": { "type": "number" },
+        "mean_snr_db": { "type": "number" },
+        "max_snr_db": { "type": "number" },
+        "peak_snr_utc": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

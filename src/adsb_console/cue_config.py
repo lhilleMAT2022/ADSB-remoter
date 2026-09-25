@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from jsonschema import Draft202012Validator
 
@@ -39,6 +39,7 @@ def load_cue_runtime_config(path: str | Path | None) -> CueRuntimeConfig:
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Cue configuration root must be a JSON object")
+    payload = cast(dict[str, Any], payload)
     _validate_schema(payload, config_path)
     prediction_values = _section(payload, "cue_prediction")
     udp_values = _section(payload, "udp_output")
@@ -141,8 +142,9 @@ def _validate_schema(payload: dict[str, Any], config_path: Path) -> None:
     schema_path = config_path.parents[1] / "schemas" / "cue-config-1.0.0.json"
     if not schema_path.exists():
         return
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    errors = sorted(Draft202012Validator(schema).iter_errors(payload), key=str)
+    schema = cast(dict[str, Any], json.loads(schema_path.read_text(encoding="utf-8")))
+    validator: Any = Draft202012Validator(schema)
+    errors = sorted(validator.iter_errors(payload), key=str)
     if errors:
         raise ValueError(f"Invalid cue configuration: {errors[0].message}")
 
@@ -153,7 +155,7 @@ def _section(payload: dict[str, Any], name: str) -> dict[str, Any]:
         return {}
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be an object")
-    return value
+    return cast(dict[str, Any], value)
 
 
 def _bool(values: dict[str, Any], name: str) -> bool:
@@ -203,7 +205,9 @@ def _optional_string(values: dict[str, Any], name: str) -> str | None:
     return _string(values, name, "")
 
 
-def _choice(values: dict[str, Any], name: str, allowed: set[str], default: str = "omit_history") -> str:
+def _choice(
+    values: dict[str, Any], name: str, allowed: set[str], default: str = "omit_history"
+) -> str:
     value = _string(values, name, default)
     if value not in allowed:
         options = ", ".join(sorted(allowed))

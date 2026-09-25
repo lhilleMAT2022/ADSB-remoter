@@ -350,7 +350,9 @@ class ADSBConsoleApp(App[None]):
             )
         )
         self._prediction_tasks[key] = task
-        task.add_done_callback(lambda finished, track_key=key: self._clear_prediction_task(track_key, finished))
+        task.add_done_callback(
+            lambda finished, track_key=key: self._clear_prediction_task(track_key, finished)
+        )
 
     def _clear_prediction_task(self, track_key: str, finished: asyncio.Task[None]) -> None:
         if self._prediction_tasks.get(track_key) is finished:

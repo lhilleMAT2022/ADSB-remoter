@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from math import atan2, cos, degrees, hypot, isfinite, pi, radians, sin, sqrt
 
 from adsb_console.models import ObserverConfig, PositionReport, VelocityReport
@@ -230,7 +231,9 @@ def position_to_enu(position: PositionReport, observer: ObserverConfig) -> EnuPo
     return ecef_to_enu(ecef, observer)
 
 
-def enu_to_position(point: EnuPoint, observer: ObserverConfig, reported_at: datetime) -> PositionReport:
+def enu_to_position(
+    point: EnuPoint, observer: ObserverConfig, reported_at: datetime
+) -> PositionReport:
     """Convert an ENU point to a geodetic position report."""
 
     latitude_deg, longitude_deg, altitude_m = ecef_to_lla(enu_to_ecef(point, observer))

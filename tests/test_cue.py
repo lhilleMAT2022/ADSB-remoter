@@ -4,12 +4,19 @@ import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 from jsonschema import Draft202012Validator, FormatChecker
 
 from adsb_console.bistatic import DtvEmitter
 from adsb_console.cue import CueSerializer, UdpCuePublisher, UdpOutputConfig
-from adsb_console.models import ObserverConfig, ObserverRole, PositionReport, TrackState, VelocityReport
+from adsb_console.models import (
+    ObserverConfig,
+    ObserverRole,
+    PositionReport,
+    TrackState,
+    VelocityReport,
+)
 from adsb_console.prediction import (
     PredictionConfig,
     PredictionRevisionManager,
@@ -84,10 +91,11 @@ def test_track_cue_validates_against_versioned_schema() -> None:
         include_history=False,
     )
     schema = json.loads(
-        (Path(__file__).parents[1] / "schemas" / "track-cue-1.0.0.json").read_text()
+        (Path(__file__).parents[1] / "schemas" / "track-cue-1.1.0.json").read_text()
     )
 
-    errors = list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(payload))
+    validator: Any = Draft202012Validator(schema, format_checker=FormatChecker())
+    errors = list(validator.iter_errors(payload))
 
     assert not errors, [error.message for error in errors]
 
@@ -113,7 +121,8 @@ def test_track_cue_omits_unusable_or_unreceivable_opportunities() -> None:
 
     opportunities = payload["opportunities"]
     assert isinstance(opportunities, list)
-    assert [item["emitter_id"] for item in opportunities if isinstance(item, dict)] == [
+    opportunity_payloads = cast(list[dict[str, object]], opportunities)
+    assert [item["emitter_id"] for item in opportunity_payloads] == [
         usable.emitter_id
     ]
 
@@ -131,6 +140,26 @@ def test_track_cue_keeps_track_state_when_no_opportunity_is_usable() -> None:
 
     assert payload["opportunities"] == []
     assert isinstance(payload["track"], dict)
+
+
+def test_track_cue_normalizes_rf_channel_to_frozen_wire_type() -> None:
+    prediction = _prediction_with_usable_window()
+    opportunity = replace(
+        prediction.opportunities[0],
+        emitter=replace(prediction.opportunities[0].emitter, rf_channel="20"),
+    )
+    payload = CueSerializer().track_cue(
+        replace(prediction, opportunities=(opportunity,)),
+        source_instance_id="test-source",
+        sequence_number=1,
+        message_id="123e4567-e89b-12d3-a456-426614174000",
+        generated_utc=datetime(2025, 1, 1, 12, 0, tzinfo=UTC),
+        include_history=False,
+    )
+
+    opportunities = payload["opportunities"]
+    assert isinstance(opportunities, list)
+    assert opportunities[0]["rf_channel"] == 20
 
 
 def _prediction_with_usable_window() -> TrackPrediction:
@@ -240,10 +269,30 @@ def test_udp_publisher_serializes_sequences_and_snapshot_messages() -> None:
     assert [item["sequence_number"] for item in payloads] == [1, 2, 3]
     schema_dir = Path(__file__).parents[1] / "schemas"
     schemas = {
-        "cue_snapshot_begin": "cue-snapshot-boundary-1.0.0.json",
-        "cue_snapshot_end": "cue-snapshot-boundary-1.0.0.json",
-        "cue_heartbeat": "cue-heartbeat-1.0.0.json",
+        "cue_snapshot_begin": "cue-snapshot-begin-1.1.0.json",
+        "cue_snapshot_end": "cue-snapshot-end-1.1.0.json",
+        "cue_heartbeat": "cue-heartbeat-1.1.0.json",
     }
     for payload in payloads:
         schema = json.loads((schema_dir / schemas[payload["message_type"]]).read_text())
-        assert not list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(payload))
+        validator: Any = Draft202012Validator(schema, format_checker=FormatChecker())
+        assert not list(validator.iter_errors(payload))
+
+
+def test_track_cue_withdrawal_validates_against_versioned_schema() -> None:
+    payload = CueSerializer().withdrawal(
+        track_id="adsb:ABC123",
+        icao="ABC123",
+        revision=1,
+        reason="track_purged",
+        source_instance_id="test-source",
+        sequence_number=1,
+        message_id="123e4567-e89b-12d3-a456-426614174000",
+        generated_utc=datetime(2025, 1, 1, 12, 0, tzinfo=UTC),
+    )
+    schema = json.loads(
+        (Path(__file__).parents[1] / "schemas" / "track-cue-withdrawal-1.1.0.json").read_text()
+    )
+
+    validator: Any = Draft202012Validator(schema, format_checker=FormatChecker())
+    assert not list(validator.iter_errors(payload))

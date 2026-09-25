@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
+from textual.binding import Binding
+
 from adsb_console.app import (
     ADSBConsoleApp,
     TrackFocusSnapshot,
@@ -27,7 +29,9 @@ from adsb_console.transforms import ClosestPointOfApproach, RangeAzEl
 
 
 def test_manual_cue_and_mode_bindings_preserve_lowercase_quit() -> None:
-    bindings = {key: action for key, action, _description in ADSBConsoleApp.BINDINGS}
+    bindings = {
+        binding.key: binding.action for binding in Binding.make_bindings(ADSBConsoleApp.BINDINGS)
+    }
 
     assert bindings["q"] == "quit"
     assert bindings["shift+q"] == "publish_selected_cue"

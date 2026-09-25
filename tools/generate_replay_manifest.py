@@ -69,8 +69,12 @@ def _file_manifest(path: Path) -> dict[str, object]:
                 icaos.add(message.icao)
             timestamp = message.generated_at
             if timestamp is not None:
-                first_timestamp = timestamp if first_timestamp is None else min(first_timestamp, timestamp)
-                last_timestamp = timestamp if last_timestamp is None else max(last_timestamp, timestamp)
+                first_timestamp = (
+                    timestamp if first_timestamp is None else min(first_timestamp, timestamp)
+                )
+                last_timestamp = (
+                    timestamp if last_timestamp is None else max(last_timestamp, timestamp)
+                )
             if message.position_report() is not None:
                 position_reports += 1
                 if message.icao and timestamp is not None:
