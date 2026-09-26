@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
+import socket
 from datetime import datetime, timedelta
 
+import pytest
 from textual.binding import Binding
+from textual.worker import WorkerState
 
 from adsb_console.app import (
     ADSBConsoleApp,
@@ -14,6 +19,7 @@ from adsb_console.app import (
     filter_display_tracks,
     main_display_bistatic_by_icao,
     next_refresh_interval_s,
+    plain_log_text,
     refresh_interval_s,
     track_focus_row,
     track_focus_status,
@@ -24,7 +30,10 @@ from adsb_console.bistatic import (
     DtvEmitter,
     top_bistatic_measurements,
 )
+from adsb_console.cue import UdpOutputConfig
+from adsb_console.cue_config import CueRuntimeConfig
 from adsb_console.models import ObserverConfig, ObserverRole, PositionReport, TrackState
+from adsb_console.prediction import PredictionConfig
 from adsb_console.tracker import ObservedTrack
 from adsb_console.transforms import ClosestPointOfApproach, RangeAzEl
 
@@ -493,3 +502,52 @@ def _breakdown(snr_db: float) -> BistaticSnrBreakdown:
         system_loss_db=0.0,
         snr_db=snr_db,
     )
+
+
+def test_plain_log_text_strips_markup_and_tolerates_bad_markup() -> None:
+    assert plain_log_text("[red]Connection failed:[/] refused") == "Connection failed: refused"
+    assert plain_log_text("[/red] unbalanced") == "[/red] unbalanced"
+
+
+async def test_headless_app_exits_nonzero_when_source_is_unreachable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        unused_port = probe.getsockname()[1]
+    app = ADSBConsoleApp(source=("127.0.0.1", unused_port), headless=True)
+
+    with caplog.at_level(logging.INFO, logger="adsb_console.app"):
+        async with app.run_test() as pilot:
+            await pilot.pause(0.5)
+
+    assert app.return_code == 1
+    assert any("Connection failed" in record.getMessage() for record in caplog.records)
+    assert all("[red]" not in record.getMessage() for record in caplog.records)
+
+
+async def test_cue_snapshot_worker_does_not_cancel_source_monitor() -> None:
+    connections: list[asyncio.StreamWriter] = []
+
+    async def hold_open(_reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        connections.append(writer)
+
+    server = await asyncio.start_server(hold_open, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    config = CueRuntimeConfig(
+        prediction=PredictionConfig(enabled=True),
+        udp_output=UdpOutputConfig(enabled=True, destination_port=port),
+    )
+    app = ADSBConsoleApp(source=("127.0.0.1", port), cue_runtime_config=config)
+    try:
+        async with app.run_test() as pilot:
+            await pilot.pause(0.2)
+            app._schedule_snapshot()  # pyright: ignore[reportPrivateUsage]
+            await pilot.pause(0.2)
+            states = {worker.name: worker.state for worker in app.workers}
+            assert states["source-monitor"] is WorkerState.RUNNING
+    finally:
+        for writer in connections:
+            writer.close()
+        server.close()
+        await server.wait_closed()

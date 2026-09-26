@@ -1,0 +1,25 @@
+# Cue tasker on the ADS-B Raspberry Pi: headless adsb-console reading the local
+# dump1090 SBS feed and publishing passive-radar cues (deploy/pi-cue-config.json).
+#
+# Install (on the Pi, after `uv sync --no-dev` in the repo):
+#   sudo cp deploy/adsb-cue.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now adsb-cue
+# Remote control from the RF collection desktop:
+#   ssh pi2@192.168.10.131 'sudo systemctl start|stop|status adsb-cue'
+#   ssh pi2@192.168.10.131 'journalctl -u adsb-cue -f'
+
+[Unit]
+Description=ADS-B passive-radar cue tasker (adsb-console --headless)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=pi2
+WorkingDirectory=/home/pi2/flightTest/ADSB-remoter
+ExecStart=/home/pi2/flightTest/ADSB-remoter/.venv/bin/adsb-console --headless --source 127.0.0.1:30003 --cue-config deploy/pi-cue-config.json
+# The app exits 1 when the SBS source is unreachable or closes; retry until dump1090 is back.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

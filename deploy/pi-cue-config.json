@@ -1,0 +1,25 @@
+{
+  "publication_mode": "automatic",
+  "cue_prediction": {
+    "enabled": true,
+    "prediction_horizon_s": 600,
+    "prediction_sample_interval_s": 10,
+    "maximum_prediction_age_s": 30,
+    "minimum_prediction_horizon_s": 30,
+    "regeneration_debounce_s": 1,
+    "minimum_track_history_s": 2,
+    "stable_track_history_s": 30,
+    "maximum_adsb_report_age_s": 20,
+    "default_detection_threshold_db": -10
+  },
+  "udp_output": {
+    "enabled": true,
+    "destination_address": "239.192.10.1",
+    "destination_port": 31986,
+    "source_address": "192.168.10.131",
+    "maximum_datagram_bytes": 16384,
+    "oversize_policy": "omit_history",
+    "heartbeat_interval_s": 10,
+    "snapshot_interval_s": 60
+  }
+}

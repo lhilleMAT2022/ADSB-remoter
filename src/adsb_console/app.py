@@ -5,7 +5,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+import logging
 import re
+import signal
+import sys
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,6 +19,8 @@ from typing import ClassVar
 from uuid import uuid4
 
 from prettytable import PrettyTable
+from rich.errors import MarkupError
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
@@ -112,6 +118,10 @@ SORT_DIRECTIONS: Mapping[str, bool] = {
 DEFAULT_SORT_COLUMN = "Rng km"
 
 
+LOGGER = logging.getLogger(__name__)
+HEADLESS_SUMMARY_INTERVAL_S = 60.0
+
+
 class ADSBConsoleApp(App[None]):
     """Minimal Textual monitor for BaseStation TCP streams."""
 
@@ -184,6 +194,7 @@ class ADSBConsoleApp(App[None]):
         dtv_bands: str = DEFAULT_DTV_BANDS,
         bistatic_display_tracks: int = DEFAULT_BISTATIC_DISPLAY_TRACKS,
         cue_runtime_config: CueRuntimeConfig | None = None,
+        headless: bool = False,
         event_clock: Callable[[], datetime] | None = None,
         source_instance_id: str | None = None,
     ) -> None:
@@ -206,6 +217,8 @@ class ADSBConsoleApp(App[None]):
         self.dtv_emitters = load_dtv_emitters(dtv_file, self.dtv_bands)
         self.bistatic_display_tracks = max(bistatic_display_tracks, 0)
         self.cue_runtime_config = cue_runtime_config or load_cue_runtime_config(None)
+        self.headless = headless
+        self._last_headless_summary_s: float | None = None
         self._event_clock = event_clock or utc_now
         self.predictions: dict[str, TrackPrediction] = {}
         self._prediction_revisions = PredictionRevisionManager()
@@ -284,7 +297,15 @@ class ADSBConsoleApp(App[None]):
             udp_config = self.cue_runtime_config.udp_output
             self.set_interval(udp_config.heartbeat_interval_s, self._schedule_heartbeat)
             self.set_interval(udp_config.snapshot_interval_s, self._schedule_snapshot)
-        self.run_worker(self._monitor_source(), name="source-monitor", exclusive=True)
+        if self.headless:
+            loop = asyncio.get_running_loop()
+            for signum in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(signum, self.exit)
+        # Exclusive workers cancel every worker in their group, so each exclusive
+        # worker gets its own group; otherwise a cue snapshot cancels the SBS reader.
+        self.run_worker(
+            self._run_source(), name="source-monitor", group="source-monitor", exclusive=True
+        )
 
     def on_unmount(self) -> None:
         if self._cue_publisher is not None:
@@ -292,6 +313,13 @@ class ADSBConsoleApp(App[None]):
             # path, so announce it before the UDP socket is closed.
             self._publish_heartbeat(stopping=True)
             self._cue_publisher.close()
+
+    async def _run_source(self) -> None:
+        await self._monitor_source()
+        if self.headless:
+            # With no operator watching, a lost SBS source is fatal so that a
+            # supervisor (systemd Restart=on-failure) reconnects by restarting.
+            self.exit(return_code=1)
 
     async def _monitor_source(self) -> None:
         self._write_log(f"Connecting to {self.source[0]}:{self.source[1]}")
@@ -445,7 +473,9 @@ class ADSBConsoleApp(App[None]):
             or self.cue_runtime_config.publication_mode is CuePublicationMode.MANUAL
         ):
             return
-        self.run_worker(self._publish_snapshot(), name="cue-snapshot", exclusive=True)
+        self.run_worker(
+            self._publish_snapshot(), name="cue-snapshot", group="cue-snapshot", exclusive=True
+        )
 
     async def _publish_snapshot(self) -> None:
         if self._cue_publisher is None:
@@ -675,6 +705,8 @@ class ADSBConsoleApp(App[None]):
     def _write_log(self, message: str) -> None:
         if self.event_log is not None:
             self.event_log.write(message)
+        if self.headless:
+            LOGGER.info(plain_log_text(message))
 
     def _log_bistatic_towers(
         self, receiver: ObserverConfig, measurements: list[BistaticMeasurement]
@@ -692,6 +724,12 @@ class ADSBConsoleApp(App[None]):
     def _update_summary(self, message: str) -> None:
         if self.summary is not None:
             self.summary.update(message)
+        if self.headless:
+            now_s = time.monotonic()
+            last_s = self._last_headless_summary_s
+            if last_s is None or now_s - last_s >= HEADLESS_SUMMARY_INTERVAL_S:
+                self._last_headless_summary_s = now_s
+                LOGGER.info(plain_log_text(message))
 
     @property
     def selected_observer(self) -> ObserverConfig:
@@ -786,6 +824,7 @@ class ADSBConsoleApp(App[None]):
         self.run_worker(
             self._publish_operator_selected_cue(prediction),
             name=f"cue-selected-{selected_icao}",
+            group="cue-selected",
             exclusive=True,
         )
 
@@ -966,9 +1005,21 @@ def main() -> None:
         type=Path,
         help="JSON configuration enabling passive-radar cue prediction and optional UDP output.",
     )
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run without a terminal UI; log to stderr and exit non-zero if the source is lost.",
+    )
     args = parser.parse_args()
 
-    ADSBConsoleApp(
+    if args.headless:
+        # Textual redirects sys.stderr while running, so log to the real stream.
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            handlers=[logging.StreamHandler(sys.__stderr__)],
+        )
+    app = ADSBConsoleApp(
         source=args.source,
         observers=load_observers_or_default(args.observerfile),
         selected_observer=args.observer,
@@ -983,7 +1034,19 @@ def main() -> None:
         dtv_bands=args.dtv_bands,
         bistatic_display_tracks=args.bistatic_display_tracks,
         cue_runtime_config=load_cue_runtime_config(args.cue_config),
-    ).run()
+        headless=args.headless,
+    )
+    app.run(headless=args.headless)
+    sys.exit(app.return_code or 0)
+
+
+def plain_log_text(message: str) -> str:
+    """Strip Rich markup from a status-log message for plain-text logging."""
+
+    try:
+        return Text.from_markup(message).plain
+    except MarkupError:
+        return message
 
 
 def _track_row(
