@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+
 from adsb_console.config import (
     default_observers,
     ensure_local_observer,
@@ -79,3 +85,29 @@ def test_cue_configuration_loads_manual_publication_mode() -> None:
     assert config.prediction.enabled
     assert config.udp_output.enabled
     assert config.publication_mode is CuePublicationMode.MANUAL
+
+
+def test_cue_configuration_defaults_and_validates_opportunity_limit(tmp_path: Path) -> None:
+    (tmp_path / "schemas").mkdir()
+    shutil.copy("schemas/cue-config-1.1.0.json", tmp_path / "schemas")
+    (tmp_path / "configs").mkdir()
+    config_path = tmp_path / "configs" / "cue.json"
+
+    config_path.write_text(json.dumps({"udp_output": {"enabled": True}}))
+    assert load_cue_runtime_config(config_path).udp_output.maximum_opportunities_per_cue == 3
+
+    config_path.write_text(
+        json.dumps({"udp_output": {"enabled": True, "maximum_opportunities_per_cue": 5}})
+    )
+    assert load_cue_runtime_config(config_path).udp_output.maximum_opportunities_per_cue == 5
+
+    config_path.write_text(
+        json.dumps({"udp_output": {"enabled": True, "maximum_opportunities_per_cue": 0}})
+    )
+    with pytest.raises(ValueError, match="Invalid cue configuration"):
+        load_cue_runtime_config(config_path)
+
+
+def test_example_cue_configurations_validate() -> None:
+    for path in ("examples/passive-radar-cueing.json", "deploy/pi-cue-config.json"):
+        assert load_cue_runtime_config(path).udp_output.maximum_opportunities_per_cue == 3

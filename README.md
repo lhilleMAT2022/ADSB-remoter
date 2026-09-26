@@ -95,6 +95,16 @@ only the track selected in Observer Focus or Track Focus when uppercase `Q` is p
 Press `m` to switch modes during a TUI session. Uppercase `Q` is intentionally distinct
 from lowercase `q`, which continues to quit the TUI.
 
+Each track cue carries at most `udp_output.maximum_opportunities_per_cue` (default 3)
+observation opportunities: the usable observer/emitter pairs with the highest peak window
+SNR, strongest first. This keeps a cue near 8 kB, well inside `maximum_datagram_bytes`.
+Uncapped, a cue with a dozen opportunities is about 25 kB, and oversize cues are dropped.
+
+For unattended use, `--headless` runs without the TUI: status lines go to stderr,
+SIGTERM exits cleanly after a `stopping` heartbeat, and losing the SBS source exits
+with status 1 so a supervisor restarts it. `deploy/adsb-cue.service` runs it this way
+on the ADS-B Raspberry Pi against the local dump1090 feed.
+
 Observer configuration is loaded from an INI file. The TUI always has a local observer and displays range, azimuth, and elevation from the selected observer. Press `o` to cycle observers.
 
 ```powershell
@@ -156,6 +166,13 @@ Capture and schema-validate planner-facing UDP traffic:
 ```powershell
 python .\tools\cue_capture.py --bind 127.0.0.1:31001 --duration-s 60
 ```
+
+A full snapshot sends every eligible track cue in one burst, which can overflow a default
+kernel socket buffer, so the capture tool asks for an 8 MiB receive buffer
+(`--receive-buffer-bytes`). Other consumers should do the same. To receive the Pi's multicast
+on the RF collection desktop, join on its data-network interface, because the desktop's
+default route is Wi-Fi: `--bind 0.0.0.0:31986 --multicast-group 239.192.10.1
+--multicast-interface 192.168.10.41`.
 
 ## Local Launchers
 

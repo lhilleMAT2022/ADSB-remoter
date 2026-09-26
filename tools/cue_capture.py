@@ -148,6 +148,12 @@ def main() -> None:
     parser.add_argument("--jsonl", default=Path("cue_capture.jsonl"), type=Path)
     parser.add_argument("--summary", default=Path("cue_capture_summary.json"), type=Path)
     parser.add_argument("--schemas-dir", default=Path("schemas"), type=Path)
+    parser.add_argument(
+        "--receive-buffer-bytes",
+        default=8 * 1024 * 1024,
+        type=int,
+        help="Socket receive buffer; snapshot bursts overflow the kernel default.",
+    )
     args = parser.parse_args()
     host, port_text = args.bind.rsplit(":", 1)
     registry = _schema_registry(args.schemas_dir)
@@ -155,6 +161,7 @@ def main() -> None:
     deadline = time.monotonic() + args.duration_s
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, args.receive_buffer_bytes)
     udp_socket.bind((host, int(port_text)))
     if args.multicast_group:
         membership = socket.inet_aton(args.multicast_group) + socket.inet_aton(

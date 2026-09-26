@@ -36,6 +36,7 @@ class UdpOutputConfig:
     oversize_policy: str = "omit_history"
     heartbeat_interval_s: float = 10.0
     snapshot_interval_s: float = 60.0
+    maximum_opportunities_per_cue: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +49,11 @@ class PublicationResult:
 
 class CueSerializer:
     """Map prediction-domain objects to finite JSON-safe schema DTOs."""
+
+    def __init__(self, *, maximum_opportunities: int | None = None) -> None:
+        # None publishes every usable opportunity; a limit keeps the N with the
+        # highest peak window SNR so a cue fits in one datagram.
+        self.maximum_opportunities = maximum_opportunities
 
     def track_cue(
         self,
@@ -132,8 +138,7 @@ class CueSerializer:
             },
             "opportunities": [
                 self._opportunity(item, include_history=include_history)
-                for item in prediction.opportunities
-                if item.observer_can_receive and item.emitter_enabled and item.windows
+                for item in self.ranked_opportunities(prediction)
             ],
         }
 
@@ -226,6 +231,21 @@ class CueSerializer:
             payload["published_track_count"] = published_track_count or 0
             payload["failed_track_count"] = failed_track_count or 0
         return payload
+
+    def ranked_opportunities(
+        self, prediction: TrackPrediction
+    ) -> list[ObservationOpportunity]:
+        """Usable opportunities, strongest peak window SNR first, capped at the limit."""
+
+        usable = [
+            item
+            for item in prediction.opportunities
+            if item.observer_can_receive and item.emitter_enabled and item.windows
+        ]
+        usable.sort(key=_peak_window_snr_db, reverse=True)
+        if self.maximum_opportunities is None:
+            return usable
+        return usable[: self.maximum_opportunities]
 
     def to_json_bytes(self, payload: dict[str, object]) -> bytes:
         return json.dumps(
@@ -347,7 +367,9 @@ class UdpCuePublisher:
     ) -> None:
         self.config = config
         self.source_instance_id = source_instance_id
-        self.serializer = serializer or CueSerializer()
+        self.serializer = serializer or CueSerializer(
+            maximum_opportunities=config.maximum_opportunities_per_cue
+        )
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_provider = id_provider or (lambda: str(uuid4()))
         self._sequence = 0
@@ -495,6 +517,10 @@ class UdpCuePublisher:
                 bytes_sent=len(encoded),
                 omitted_history=omitted_history,
             )
+
+
+def _peak_window_snr_db(opportunity: ObservationOpportunity) -> float:
+    return max(window.max_snr_db for window in opportunity.windows)
 
 
 def _iso_utc(value: datetime) -> str:

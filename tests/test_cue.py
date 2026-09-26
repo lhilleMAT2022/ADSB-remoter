@@ -297,3 +297,58 @@ def test_track_cue_withdrawal_validates_against_versioned_schema() -> None:
 
     validator: Any = Draft202012Validator(schema, format_checker=FormatChecker())
     assert not list(validator.iter_errors(payload))
+
+
+def _prediction_with_ranked_opportunities(peak_snrs_db: list[float]) -> TrackPrediction:
+    prediction = _prediction_with_usable_window()
+    base = prediction.opportunities[0]
+    opportunities = tuple(
+        replace(
+            base,
+            emitter_id=f"emitter-{index}",
+            windows=(replace(base.windows[0], max_snr_db=peak_snr_db),),
+        )
+        for index, peak_snr_db in enumerate(peak_snrs_db)
+    )
+    return replace(prediction, opportunities=opportunities)
+
+
+def _opportunity_emitter_ids(payload: dict[str, object]) -> list[object]:
+    opportunities = cast(list[dict[str, object]], payload["opportunities"])
+    return [item["emitter_id"] for item in opportunities]
+
+
+def test_track_cue_keeps_top_opportunities_by_peak_window_snr() -> None:
+    prediction = _prediction_with_ranked_opportunities([-9.0, 4.0, -2.0, 12.0, 0.5])
+    arguments: dict[str, Any] = {
+        "source_instance_id": "test-source",
+        "sequence_number": 1,
+        "message_id": "123e4567-e89b-12d3-a456-426614174000",
+        "generated_utc": datetime(2025, 1, 1, 12, 0, tzinfo=UTC),
+        "include_history": False,
+    }
+
+    capped = CueSerializer(maximum_opportunities=3).track_cue(prediction, **arguments)
+    uncapped = CueSerializer().track_cue(prediction, **arguments)
+
+    assert _opportunity_emitter_ids(capped) == ["emitter-3", "emitter-1", "emitter-4"]
+    assert len(_opportunity_emitter_ids(uncapped)) == 5
+
+
+def test_udp_publisher_applies_configured_opportunity_limit() -> None:
+    capture = _CaptureSocket()
+    publisher = UdpCuePublisher(
+        UdpOutputConfig(enabled=True, maximum_opportunities_per_cue=2),
+        source_instance_id="test-source",
+        udp_socket=capture,  # type: ignore[arg-type]
+    )
+
+    result = publisher.publish_prediction(
+        _prediction_with_ranked_opportunities([1.0, 5.0, 3.0, -4.0])
+    )
+
+    assert result is not None
+    assert _opportunity_emitter_ids(json.loads(capture.payloads[0])) == [
+        "emitter-1",
+        "emitter-2",
+    ]

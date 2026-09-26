@@ -122,6 +122,9 @@ def load_cue_runtime_config(path: str | Path | None) -> CueRuntimeConfig:
         oversize_policy=_choice(udp_values, "oversize_policy", {"omit_history", "reject"}),
         heartbeat_interval_s=_positive(udp_values, "heartbeat_interval_s", 10.0),
         snapshot_interval_s=_positive(udp_values, "snapshot_interval_s", 60.0),
+        maximum_opportunities_per_cue=int(
+            _positive(udp_values, "maximum_opportunities_per_cue", 3.0)
+        ),
     )
     if not 1 <= udp.destination_port <= 65_535:
         raise ValueError("udp_output.destination_port must be between 1 and 65535")
@@ -139,7 +142,7 @@ def load_cue_runtime_config(path: str | Path | None) -> CueRuntimeConfig:
 
 
 def _validate_schema(payload: dict[str, Any], config_path: Path) -> None:
-    schema_path = config_path.parents[1] / "schemas" / "cue-config-1.0.0.json"
+    schema_path = config_path.parents[1] / "schemas" / "cue-config-1.1.0.json"
     if not schema_path.exists():
         return
     schema = cast(dict[str, Any], json.loads(schema_path.read_text(encoding="utf-8")))
