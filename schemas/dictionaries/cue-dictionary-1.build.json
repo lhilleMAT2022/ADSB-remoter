@@ -1,0 +1,57 @@
+{
+  "dictionary": "cue-dictionary-1.bin",
+  "sha256": "ca649af0a49ceb14b8610aeec89e55c3e83801e8d7e50d449aeeedac4e5b4cd4",
+  "bytes": 32768,
+  "schema_version": "2.0.0",
+  "built_by": "tools/build_cue_dictionary.py",
+  "captures": [
+    {
+      "file": "tests/fixtures/sbs_clean/10_adsb_20220413_060850.csv.gz",
+      "sha256": "8b413d52127df203e933eca0f6fb1660e907b28607c8f1f4ffb183dd41a439ad"
+    },
+    {
+      "file": "tests/fixtures/sbs_clean/11_adsb_20220413_060850.csv.gz",
+      "sha256": "9fa61793fb340afa96db8fce135828335600676fb47bc4a6aff6115801db50d4"
+    },
+    {
+      "file": "tests/fixtures/sbs_clean/12_adsb_20220413_060850.csv.gz",
+      "sha256": "818e08c423bff31b33d81dff9c16eec8acbee867ccf2d7295a4bf82a66f209e1"
+    },
+    {
+      "file": "tests/fixtures/sbs_clean/13_adsb_20220413_060850.csv.gz",
+      "sha256": "a1760fb53337edeab03b0173297eaa712f3993b0262bc7b9de8fdef6456fb971"
+    },
+    {
+      "file": "tests/fixtures/sbs_clean/14_adsb_20220413_060850.csv.gz",
+      "sha256": "e45bc792c4b78a75b3406eff15c260aa724faf245a45041792adf00e81c3ab76"
+    },
+    {
+      "file": "tests/fixtures/sbs_clean/15_adsb_20220413_060850.csv.gz",
+      "sha256": "666e568c4a551ac4ca9169083588df161dec8cf0615ea48779a08602b4db9582"
+    },
+    {
+      "file": "tests/fixtures/sbs_clean/16_adsb_20220413_060850.csv.gz",
+      "sha256": "52b4b372bdff217298620e431e0cb8acc4508e3d63841a9037a089b1308dd0cc"
+    },
+    {
+      "file": "tests/fixtures/sbs_clean/17_adsb_20220413_060850.csv.gz",
+      "sha256": "299c4db0a4ad0570da60bf4cdc656fbd6fa87266bc90b57854f6c193306b343b"
+    },
+    {
+      "file": "tests/fixtures/sbs_clean/18_adsb_20220413_060850.csv.gz",
+      "sha256": "2b27599cc5fdff53a06139339846d6cd9e8d6a6f7fb4c5c227f2f70990c1709b"
+    },
+    {
+      "file": "tests/fixtures/sbs_clean/19_adsb_20220413_060850.csv.gz",
+      "sha256": "01d3e4429595a10580ac9592a128afed4a9daa7b21904aec03d2e050d6485a91"
+    },
+    {
+      "file": "tests/fixtures/sbs_clean/20_adsb_20220413_060850.csv.gz",
+      "sha256": "713eb61dbef59d306e81e7998ed7bb5bfd7eebb65d1d834626c932c3b3fc6dc3"
+    }
+  ],
+  "observers": "deploy/pi-observers.ini",
+  "prediction_config": "deploy/pi-cue-config.json",
+  "emitters": "20_DTV_direct_path_input.csv (uhf)",
+  "corpus_track_cues": 1707
+}

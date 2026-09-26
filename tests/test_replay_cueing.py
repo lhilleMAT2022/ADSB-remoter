@@ -108,9 +108,8 @@ def test_startup_replay_partition_produces_schema_valid_cue() -> None:
         sequence_number=1,
         message_id="123e4567-e89b-12d3-a456-426614174000",
         generated_utc=track.last_seen,
-        include_history=False,
     )
-    schema_path = Path(__file__).parents[1] / "schemas" / "track-cue-1.1.0.json"
+    schema_path = Path(__file__).parents[1] / "schemas" / "track-cue-2.0.0.json"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
     assert len(prediction.opportunities) == 6

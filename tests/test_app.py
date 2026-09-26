@@ -15,6 +15,7 @@ from adsb_console.app import (
     TrackFocusSnapshot,
     bisnr_breakdown_table,
     bistatic_tower_log_table,
+    cue_config_with_overrides,
     cue_heartbeat_status,
     filter_display_tracks,
     main_display_bistatic_by_icao,
@@ -31,7 +32,7 @@ from adsb_console.bistatic import (
     top_bistatic_measurements,
 )
 from adsb_console.cue import UdpOutputConfig
-from adsb_console.cue_config import CueRuntimeConfig
+from adsb_console.cue_config import CueRuntimeConfig, load_cue_runtime_config
 from adsb_console.models import ObserverConfig, ObserverRole, PositionReport, TrackState
 from adsb_console.prediction import PredictionConfig
 from adsb_console.tracker import ObservedTrack
@@ -551,3 +552,17 @@ async def test_cue_snapshot_worker_does_not_cancel_source_monitor() -> None:
             writer.close()
         server.close()
         await server.wait_closed()
+
+
+def test_cue_startup_overrides_set_framing_and_summary_for_the_run() -> None:
+    base = load_cue_runtime_config("deploy/pi-cue-config.json")
+
+    plain = cue_config_with_overrides(base, encoding="json", include_summary=True)
+    unchanged = cue_config_with_overrides(base, encoding=None, include_summary=False)
+
+    assert base.udp_output.encoding == "deflate_dictionary"
+    assert plain.udp_output.encoding == "json"
+    assert plain.include_summary is True
+    assert unchanged == base
+    with pytest.raises(ValueError, match="Unknown cue encoding"):
+        cue_config_with_overrides(base, encoding="gzip", include_summary=False)

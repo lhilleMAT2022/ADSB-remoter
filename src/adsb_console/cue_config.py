@@ -10,7 +10,7 @@ from typing import Any, cast
 
 from jsonschema import Draft202012Validator
 
-from adsb_console.cue import UdpOutputConfig
+from adsb_console.cue import CueEncoding, UdpOutputConfig
 from adsb_console.prediction import PredictionConfig
 
 
@@ -24,6 +24,8 @@ class CueRuntimeConfig:
     prediction: PredictionConfig
     udp_output: UdpOutputConfig
     publication_mode: CuePublicationMode = CuePublicationMode.AUTOMATIC
+    # Debug-only opportunity summary (ICD 2.3); fixed for the whole run.
+    include_summary: bool = False
 
 
 def disabled_cue_runtime_config() -> CueRuntimeConfig:
@@ -108,23 +110,28 @@ def load_cue_runtime_config(path: str | Path | None) -> CueRuntimeConfig:
             prediction_values, "maximum_abs_bistatic_doppler_hz"
         ),
     )
-    maximum_datagram_bytes = int(
-        _positive(udp_values, "maximum_datagram_bytes", 16_384.0)
+    maximum_datagram_bytes = int(_positive(udp_values, "maximum_datagram_bytes", 1_472.0))
+    if not 512 <= maximum_datagram_bytes <= 65_507:
+        raise ValueError("udp_output.maximum_datagram_bytes must be between 512 and 65507")
+    dictionary_id = int(_positive(udp_values, "dictionary_id", 1.0))
+    if dictionary_id > 255:
+        raise ValueError("udp_output.dictionary_id must be between 1 and 255")
+    encoding = cast(
+        CueEncoding, _choice(udp_values, "encoding", {"json", "deflate_dictionary"}, "json")
     )
-    if maximum_datagram_bytes > 65_507:
-        raise ValueError("udp_output.maximum_datagram_bytes must be <= 65507")
     udp = UdpOutputConfig(
         enabled=_bool(udp_values, "enabled"),
         destination_address=_string(udp_values, "destination_address", "127.0.0.1"),
         destination_port=int(_positive(udp_values, "destination_port", 31_001.0)),
         source_address=_optional_string(udp_values, "source_address"),
         maximum_datagram_bytes=maximum_datagram_bytes,
-        oversize_policy=_choice(udp_values, "oversize_policy", {"omit_history", "reject"}),
         heartbeat_interval_s=_positive(udp_values, "heartbeat_interval_s", 10.0),
         snapshot_interval_s=_positive(udp_values, "snapshot_interval_s", 60.0),
         maximum_opportunities_per_cue=int(
-            _positive(udp_values, "maximum_opportunities_per_cue", 3.0)
+            _positive(udp_values, "maximum_opportunities_per_cue", 8.0)
         ),
+        encoding=encoding,
+        dictionary_id=dictionary_id,
     )
     if not 1 <= udp.destination_port <= 65_535:
         raise ValueError("udp_output.destination_port must be between 1 and 65535")
@@ -138,11 +145,12 @@ def load_cue_runtime_config(path: str | Path | None) -> CueRuntimeConfig:
         prediction=prediction,
         udp_output=udp,
         publication_mode=CuePublicationMode(mode_value),
+        include_summary=_bool(prediction_values, "include_summary"),
     )
 
 
 def _validate_schema(payload: dict[str, Any], config_path: Path) -> None:
-    schema_path = config_path.parents[1] / "schemas" / "cue-config-1.1.0.json"
+    schema_path = config_path.parents[1] / "schemas" / "cue-config-2.0.0.json"
     if not schema_path.exists():
         return
     schema = cast(dict[str, Any], json.loads(schema_path.read_text(encoding="utf-8")))
@@ -208,9 +216,7 @@ def _optional_string(values: dict[str, Any], name: str) -> str | None:
     return _string(values, name, "")
 
 
-def _choice(
-    values: dict[str, Any], name: str, allowed: set[str], default: str = "omit_history"
-) -> str:
+def _choice(values: dict[str, Any], name: str, allowed: set[str], default: str) -> str:
     value = _string(values, name, default)
     if value not in allowed:
         options = ", ".join(sorted(allowed))

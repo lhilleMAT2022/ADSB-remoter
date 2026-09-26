@@ -1,10 +1,16 @@
-"""UDP capture and planner-emulator validator for ADS-B passive-radar cues."""
+"""UDP capture and planner-emulator validator for ADS-B passive-radar cues.
+
+Accepts both framings (ICD_Messages.md section 1.3): plain JSON datagrams and compressed
+ones (0xDC, dictionary id, raw deflate). Messages are validated after decoding. Use
+--print to watch the decoded stream; socat cannot split a compressed stream into messages.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
 import socket
+import sys
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -13,6 +19,15 @@ from statistics import median
 from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
+
+from adsb_console.cue import (
+    COMPRESSED_FRAME_TAG,
+    DICTIONARY_DIR,
+    decode_datagram,
+    load_dictionaries,
+)
+
+ONE_FRAME_BYTES = 1472
 
 
 @dataclass(slots=True)
@@ -30,7 +45,10 @@ class SemanticSummary:
     stale_revisions: int = 0
     maximum_datagram_bytes: int = 0
     total_datagram_bytes: int = 0
+    datagrams_over_one_frame: int = 0
+    framing_counts: Counter[str] = field(default_factory=Counter)
     track_cue_sizes: list[int] = field(default_factory=list)
+    track_cue_json_sizes: list[int] = field(default_factory=list)
     opportunities_per_cue: list[int] = field(default_factory=list)
     snapshot_track_cue_counts: Counter[str] = field(default_factory=Counter)
     snapshot_expected_counts: dict[str, int] = field(default_factory=dict)
@@ -40,10 +58,16 @@ class SemanticSummary:
     _last_sequence_by_source: dict[str, int] = field(default_factory=dict)
     _latest_revision_by_track: dict[str, int] = field(default_factory=dict)
 
-    def consume(self, raw: bytes, payload: dict[str, Any], errors: list[str]) -> None:
+    def consume(
+        self, raw: bytes, payload: dict[str, Any], errors: list[str], message_bytes: int = 0
+    ) -> None:
         self.datagrams_received += 1
         self.maximum_datagram_bytes = max(self.maximum_datagram_bytes, len(raw))
         self.total_datagram_bytes += len(raw)
+        self.datagrams_over_one_frame += len(raw) > ONE_FRAME_BYTES
+        self.framing_counts[
+            "compressed" if raw[:1] == bytes((COMPRESSED_FRAME_TAG,)) else "plain"
+        ] += 1
         if errors:
             self.invalid_messages += 1
             self.schema_failures.extend(errors)
@@ -65,6 +89,7 @@ class SemanticSummary:
         self._last_sequence_by_source[source] = max(sequence, prior_sequence or sequence)
         if message_type == "track_cue":
             self.track_cue_sizes.append(len(raw))
+            self.track_cue_json_sizes.append(message_bytes or len(raw))
             opportunities = payload.get("opportunities")
             if isinstance(opportunities, list):
                 self.opportunities_per_cue.append(len(opportunities))
@@ -113,7 +138,10 @@ class SemanticSummary:
                 else self.total_datagram_bytes / self.datagrams_received
             ),
             "schema_failure_count": len(self.schema_failures),
+            "datagrams_over_one_frame": self.datagrams_over_one_frame,
+            "framing_counts": dict(self.framing_counts),
             "track_cue_size_bytes": _statistics(self.track_cue_sizes),
+            "track_cue_json_size_bytes": _statistics(self.track_cue_json_sizes),
             "opportunities_per_track_cue": _statistics(self.opportunities_per_cue),
             "snapshot_track_cue_consistency": {
                 snapshot_id: {
@@ -148,6 +176,10 @@ def main() -> None:
     parser.add_argument("--jsonl", default=Path("cue_capture.jsonl"), type=Path)
     parser.add_argument("--summary", default=Path("cue_capture_summary.json"), type=Path)
     parser.add_argument("--schemas-dir", default=Path("schemas"), type=Path)
+    parser.add_argument("--dictionaries-dir", default=DICTIONARY_DIR, type=Path)
+    parser.add_argument(
+        "--print", action="store_true", help="Write each decoded message to stdout as a JSON line."
+    )
     parser.add_argument(
         "--receive-buffer-bytes",
         default=8 * 1024 * 1024,
@@ -157,18 +189,10 @@ def main() -> None:
     args = parser.parse_args()
     host, port_text = args.bind.rsplit(":", 1)
     registry = _schema_registry(args.schemas_dir)
+    dictionaries = load_dictionaries(args.dictionaries_dir)
     summary = SemanticSummary()
     deadline = time.monotonic() + args.duration_s
-    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, args.receive_buffer_bytes)
-    udp_socket.bind((host, int(port_text)))
-    if args.multicast_group:
-        membership = socket.inet_aton(args.multicast_group) + socket.inet_aton(
-            args.multicast_interface
-        )
-        udp_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
-    udp_socket.settimeout(min(args.duration_s, 0.5))
+    udp_socket = _open_socket(args, host, int(port_text))
     with args.jsonl.open("w", encoding="utf-8") as output:
         while time.monotonic() < deadline:
             try:
@@ -176,15 +200,20 @@ def main() -> None:
             except TimeoutError:
                 continue
             received_utc = time.time()
+            message = b""
             try:
-                payload = json.loads(raw.decode("utf-8"))
+                message = decode_datagram(raw, dictionaries)
+                payload = json.loads(message.decode("utf-8"))
                 if not isinstance(payload, dict):
                     raise ValueError("JSON root is not an object")
                 errors = _validate(payload, registry)
             except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
                 payload = {"invalid_payload": True}
                 errors = [str(exc)]
-            summary.consume(raw, payload, errors)
+            summary.consume(raw, payload, errors, len(message))
+            if args.print:
+                sys.stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
+                sys.stdout.flush()
             output.write(
                 json.dumps(
                     {
@@ -198,12 +227,27 @@ def main() -> None:
             )
     udp_socket.close()
     args.summary.write_text(json.dumps(summary.as_dict(), indent=2, sort_keys=True) + "\n")
-    print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
+    report = json.dumps(summary.as_dict(), indent=2, sort_keys=True)
+    print(report, file=sys.stderr if args.print else sys.stdout)
+
+
+def _open_socket(args: argparse.Namespace, host: str, port: int) -> socket.socket:
+    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, args.receive_buffer_bytes)
+    udp_socket.bind((host, port))
+    if args.multicast_group:
+        membership = socket.inet_aton(args.multicast_group) + socket.inet_aton(
+            args.multicast_interface
+        )
+        udp_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+    udp_socket.settimeout(min(args.duration_s, 0.5))
+    return udp_socket
 
 
 def _schema_registry(directory: Path) -> dict[str, Draft202012Validator]:
     result: dict[str, Draft202012Validator] = {}
-    for path in directory.glob("*.json"):
+    for path in directory.glob("*.json"):  # current versions only; archive/ is not searched
         payload = json.loads(path.read_text(encoding="utf-8"))
         for message_type in _message_types_from_schema(payload):
             result[message_type] = Draft202012Validator(payload, format_checker=FormatChecker())

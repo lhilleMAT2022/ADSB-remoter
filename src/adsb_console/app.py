@@ -11,7 +11,7 @@ import signal
 import sys
 import time
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from math import isfinite
 from pathlib import Path
@@ -33,7 +33,7 @@ from adsb_console.bistatic import (
     top_bistatic_measurements,
 )
 from adsb_console.config import load_observers_or_default, parse_endpoint
-from adsb_console.cue import CueHeartbeatStatus, UdpCuePublisher
+from adsb_console.cue import CueHeartbeatStatus, CueSerializer, UdpCuePublisher
 from adsb_console.cue_config import CuePublicationMode, CueRuntimeConfig, load_cue_runtime_config
 from adsb_console.models import ObserverConfig, PositionReport, TrackState, VelocityReport, utc_now
 from adsb_console.prediction import (
@@ -230,6 +230,16 @@ class ADSBConsoleApp(App[None]):
             UdpCuePublisher(
                 self.cue_runtime_config.udp_output,
                 source_instance_id=source_instance_id or f"adsb-console-{uuid4()}",
+                serializer=CueSerializer(
+                    maximum_opportunities=(
+                        self.cue_runtime_config.udp_output.maximum_opportunities_per_cue
+                    ),
+                    include_summary=self.cue_runtime_config.include_summary,
+                    assumed_rcs_dbsm=self.cue_runtime_config.prediction.assumed_rcs_dbsm,
+                    detection_threshold_db=(
+                        self.cue_runtime_config.prediction.detection_threshold_db
+                    ),
+                ),
             )
             if self.cue_runtime_config.udp_output.enabled
             else None
@@ -1006,6 +1016,17 @@ def main() -> None:
         help="JSON configuration enabling passive-radar cue prediction and optional UDP output.",
     )
     parser.add_argument(
+        "--cue-encoding",
+        choices=("json", "deflate_dictionary"),
+        default=None,
+        help="Override the cue datagram framing for this run (plain JSON is for debugging).",
+    )
+    parser.add_argument(
+        "--cue-include-summary",
+        action="store_true",
+        help="Debug only: add the per-opportunity summary to every track_cue of this run.",
+    )
+    parser.add_argument(
         "--headless",
         action="store_true",
         help="Run without a terminal UI; log to stderr and exit non-zero if the source is lost.",
@@ -1033,11 +1054,35 @@ def main() -> None:
         dtv_file=args.dtv_file,
         dtv_bands=args.dtv_bands,
         bistatic_display_tracks=args.bistatic_display_tracks,
-        cue_runtime_config=load_cue_runtime_config(args.cue_config),
+        cue_runtime_config=cue_config_with_overrides(
+            load_cue_runtime_config(args.cue_config),
+            encoding=args.cue_encoding,
+            include_summary=args.cue_include_summary,
+        ),
         headless=args.headless,
     )
     app.run(headless=args.headless)
     sys.exit(app.return_code or 0)
+
+
+def cue_config_with_overrides(
+    config: CueRuntimeConfig, *, encoding: str | None, include_summary: bool
+) -> CueRuntimeConfig:
+    """Apply startup command-line overrides; the framing and summary stay fixed for the run."""
+
+    if encoding is not None:
+        if encoding not in ("json", "deflate_dictionary"):
+            raise ValueError(f"Unknown cue encoding {encoding!r}")
+        config = replace(
+            config,
+            udp_output=replace(
+                config.udp_output,
+                encoding="json" if encoding == "json" else "deflate_dictionary",
+            ),
+        )
+    if include_summary:
+        config = replace(config, include_summary=True)
+    return config
 
 
 def plain_log_text(message: str) -> str:

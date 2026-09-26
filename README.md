@@ -97,10 +97,14 @@ only the track selected in Observer Focus or Track Focus when uppercase `Q` is p
 Press `m` to switch modes during a TUI session. Uppercase `Q` is intentionally distinct
 from lowercase `q`, which continues to quit the TUI.
 
-Each track cue carries at most `udp_output.maximum_opportunities_per_cue` (default 3)
-observation opportunities: the usable observer/emitter pairs with the highest peak window
-SNR, strongest first. This keeps a cue near 8 kB, well inside `maximum_datagram_bytes`.
-Uncapped, a cue with a dozen opportunities is about 25 kB, and oversize cues are dropped.
+Messages follow CT schema 2.0.0 (`schemas/*-2.0.0.json`, ICD §2):
+- **Values:** times are integer epoch milliseconds (`*_utc_ms`), and values are rounded to the ICD resolutions.
+- **Framing** is chosen once at startup:
+  - `udp_output.encoding: "json"` sends plain JSON datagrams, for debugging;
+  - `"deflate_dictionary"` sends each message compressed with the released preset dictionary `schemas/dictionaries/cue-dictionary-<id>.bin` (tag byte `0xDC`, then the dictionary id);
+  - `--cue-encoding` overrides the config for one run.
+- **Size:** each datagram must fit `maximum_datagram_bytes` (default 1472, one Ethernet frame). A track cue carries up to `maximum_opportunities_per_cue` (default 8) usable opportunities, strongest peak window SNR first, and sheds the weakest until it fits. Compressed, a cue with 8 opportunities is about 750 B.
+- **Debug summary:** `--cue-include-summary` adds the per-opportunity `summary` for debugging.
 
 For unattended use, `--headless` runs without the TUI: status lines go to stderr,
 SIGTERM exits cleanly after a `stopping` heartbeat, and losing the SBS source exits
@@ -163,7 +167,7 @@ $env:ADSB_REPLAY_CORPUS_DIR = "..\000_sbs_for_ELAD_cleanup\sbs_clean"
 python .\tools\generate_replay_manifest.py
 ```
 
-Capture and schema-validate planner-facing UDP traffic:
+Capture and schema-validate planner-facing UDP traffic. The tool decodes both framings; `--print` streams the decoded messages as JSON lines:
 
 ```powershell
 python .\tools\cue_capture.py --bind 127.0.0.1:31001 --duration-s 60

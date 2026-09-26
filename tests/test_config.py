@@ -89,12 +89,16 @@ def test_cue_configuration_loads_manual_publication_mode() -> None:
 
 def test_cue_configuration_defaults_and_validates_opportunity_limit(tmp_path: Path) -> None:
     (tmp_path / "schemas").mkdir()
-    shutil.copy("schemas/cue-config-1.1.0.json", tmp_path / "schemas")
+    shutil.copy("schemas/cue-config-2.0.0.json", tmp_path / "schemas")
     (tmp_path / "configs").mkdir()
     config_path = tmp_path / "configs" / "cue.json"
 
     config_path.write_text(json.dumps({"udp_output": {"enabled": True}}))
-    assert load_cue_runtime_config(config_path).udp_output.maximum_opportunities_per_cue == 3
+    defaults = load_cue_runtime_config(config_path)
+    assert defaults.udp_output.maximum_opportunities_per_cue == 8
+    assert defaults.udp_output.maximum_datagram_bytes == 1472
+    assert defaults.udp_output.encoding == "json"
+    assert defaults.include_summary is False
 
     config_path.write_text(
         json.dumps({"udp_output": {"enabled": True, "maximum_opportunities_per_cue": 5}})
@@ -109,8 +113,26 @@ def test_cue_configuration_defaults_and_validates_opportunity_limit(tmp_path: Pa
 
 
 def test_example_cue_configurations_validate() -> None:
-    for path in ("examples/passive-radar-cueing.json", "deploy/pi-cue-config.json"):
-        assert load_cue_runtime_config(path).udp_output.maximum_opportunities_per_cue == 3
+    example = load_cue_runtime_config("examples/passive-radar-cueing.json")
+    deployed = load_cue_runtime_config("deploy/pi-cue-config.json")
+
+    assert example.udp_output.encoding == "json"
+    assert deployed.udp_output.encoding == "deflate_dictionary"
+    for config in (example, deployed):
+        assert config.udp_output.maximum_opportunities_per_cue == 8
+        assert config.udp_output.maximum_datagram_bytes == 1472
+        assert config.include_summary is False
+
+
+def test_cue_configuration_rejects_the_retired_oversize_policy(tmp_path: Path) -> None:
+    (tmp_path / "schemas").mkdir()
+    shutil.copy("schemas/cue-config-2.0.0.json", tmp_path / "schemas")
+    (tmp_path / "configs").mkdir()
+    config_path = tmp_path / "configs" / "cue.json"
+    config_path.write_text(json.dumps({"udp_output": {"oversize_policy": "omit_history"}}))
+
+    with pytest.raises(ValueError, match="Invalid cue configuration"):
+        load_cue_runtime_config(config_path)
 
 
 def test_pi_deployment_observers_are_the_receive_site_only() -> None:

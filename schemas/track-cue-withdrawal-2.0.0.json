@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://passive-radar.local/schemas/track-cue-withdrawal-2.0.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "message_type",
+    "message_id",
+    "source",
+    "source_instance_id",
+    "sequence_number",
+    "generated_utc_ms",
+    "track_id",
+    "icao",
+    "withdrawn_prediction_revision",
+    "reason"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0"
+    },
+    "message_type": {
+      "const": "track_cue_withdrawal"
+    },
+    "message_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "source": {
+      "const": "ADSBConsoleApp"
+    },
+    "source_instance_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sequence_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "generated_utc_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "track_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "icao": {
+      "type": "string",
+      "pattern": "^[0-9A-F]{6}$"
+    },
+    "withdrawn_prediction_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

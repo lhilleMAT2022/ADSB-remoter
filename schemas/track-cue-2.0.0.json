@@ -1,0 +1,642 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://passive-radar.local/schemas/track-cue-2.0.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "message_type",
+    "message_id",
+    "source",
+    "source_instance_id",
+    "sequence_number",
+    "generated_utc_ms",
+    "snapshot_id",
+    "track",
+    "prediction",
+    "models",
+    "opportunities"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0"
+    },
+    "message_type": {
+      "const": "track_cue"
+    },
+    "message_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "source": {
+      "const": "ADSBConsoleApp"
+    },
+    "source_instance_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sequence_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "generated_utc_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "snapshot_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "track": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "track_id",
+        "icao",
+        "callsign",
+        "status",
+        "last_report_utc_ms",
+        "report_age_s",
+        "state"
+      ],
+      "properties": {
+        "track_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "icao": {
+          "type": "string",
+          "pattern": "^[0-9A-F]{6}$"
+        },
+        "callsign": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "active",
+            "stale",
+            "purged",
+            "invalid"
+          ]
+        },
+        "last_report_utc_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "report_age_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        }
+      }
+    },
+    "prediction": {
+      "$ref": "#/$defs/prediction"
+    },
+    "models": {
+      "$ref": "#/$defs/models"
+    },
+    "opportunities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/opportunity"
+      }
+    }
+  },
+  "$defs": {
+    "vector3": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "epoch_utc_ms",
+        "reference_frame",
+        "reference_origin_id",
+        "position_enu_m",
+        "velocity_enu_mps",
+        "latitude_deg",
+        "longitude_deg",
+        "altitude_m_msl",
+        "ground_speed_mps",
+        "track_angle_deg",
+        "vertical_rate_mps",
+        "quality"
+      ],
+      "properties": {
+        "epoch_utc_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reference_frame": {
+          "const": "ENU"
+        },
+        "reference_origin_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "position_enu_m": {
+          "$ref": "#/$defs/vector3"
+        },
+        "velocity_enu_mps": {
+          "$ref": "#/$defs/vector3"
+        },
+        "latitude_deg": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "longitude_deg": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "altitude_m_msl": {
+          "type": "number"
+        },
+        "ground_speed_mps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "track_angle_deg": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "vertical_rate_mps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "quality": {
+          "$ref": "#/$defs/quality"
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vertical_rate_assumed",
+        "horizontal_velocity_estimated",
+        "position_valid",
+        "velocity_valid"
+      ],
+      "properties": {
+        "vertical_rate_assumed": {
+          "type": "boolean"
+        },
+        "horizontal_velocity_estimated": {
+          "type": "boolean"
+        },
+        "position_valid": {
+          "type": "boolean"
+        },
+        "velocity_valid": {
+          "type": "boolean"
+        }
+      }
+    },
+    "prediction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "created_utc_ms",
+        "valid_until_utc_ms",
+        "horizon_s",
+        "sample_interval_s",
+        "motion_model",
+        "maturity",
+        "update_reason",
+        "validation"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "created_utc_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "valid_until_utc_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "horizon_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "sample_interval_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "motion_model": {
+          "const": "constant_velocity_enu"
+        },
+        "maturity": {
+          "enum": [
+            "initial",
+            "stabilizing",
+            "stable",
+            "invalid"
+          ]
+        },
+        "update_reason": {
+          "enum": [
+            "initial_track",
+            "track_maneuver",
+            "prediction_error",
+            "periodic_refresh",
+            "observer_configuration_change",
+            "emitter_configuration_change",
+            "application_snapshot"
+          ]
+        },
+        "validation": {
+          "$ref": "#/$defs/validation"
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position_error_m",
+        "position_error_threshold_m",
+        "velocity_error_mps",
+        "velocity_error_threshold_mps",
+        "heading_change_deg",
+        "heading_change_threshold_deg"
+      ],
+      "properties": {
+        "position_error_m": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "position_error_threshold_m": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "velocity_error_mps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "velocity_error_threshold_mps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "heading_change_deg": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "heading_change_threshold_deg": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bistatic_range_definition",
+        "doppler_source",
+        "doppler_sign_convention",
+        "snr_model_id",
+        "assumed_rcs_dbsm",
+        "detection_threshold_db"
+      ],
+      "properties": {
+        "bistatic_range_definition": {
+          "const": "tx_target_plus_target_rx_minus_tx_rx"
+        },
+        "doppler_source": {
+          "const": "analytic_derivative_of_bistatic_range"
+        },
+        "doppler_sign_convention": {
+          "const": "positive_for_decreasing_bistatic_path"
+        },
+        "snr_model_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "assumed_rcs_dbsm": {
+          "type": "number"
+        },
+        "detection_threshold_db": {
+          "type": "number"
+        }
+      }
+    },
+    "opportunity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observer_id",
+        "emitter_id",
+        "carrier_frequency_hz",
+        "rf_channel",
+        "current",
+        "windows"
+      ],
+      "properties": {
+        "observer_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "emitter_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "carrier_frequency_hz": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "rf_channel": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 2,
+          "maximum": 69
+        },
+        "current": {
+          "$ref": "#/$defs/sample"
+        },
+        "windows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/window"
+          }
+        },
+        "summary": {
+          "$ref": "#/$defs/summary"
+        }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "time_offset_s",
+        "sample_utc_ms",
+        "bistatic_range_m",
+        "bistatic_range_rate_mps",
+        "bistatic_doppler_hz",
+        "predicted_bistatic_snr_db",
+        "geometrically_visible",
+        "rf_available",
+        "within_range_limits",
+        "within_doppler_limits",
+        "above_snr_threshold",
+        "usable"
+      ],
+      "properties": {
+        "time_offset_s": {
+          "type": "number"
+        },
+        "sample_utc_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bistatic_range_m": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bistatic_range_rate_mps": {
+          "type": "number"
+        },
+        "bistatic_doppler_hz": {
+          "type": "number"
+        },
+        "predicted_bistatic_snr_db": {
+          "type": "number"
+        },
+        "geometrically_visible": {
+          "type": "boolean"
+        },
+        "rf_available": {
+          "type": "boolean"
+        },
+        "within_range_limits": {
+          "type": "boolean"
+        },
+        "within_doppler_limits": {
+          "type": "boolean"
+        },
+        "above_snr_threshold": {
+          "type": "boolean"
+        },
+        "usable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_utc_ms",
+        "end_utc_ms",
+        "duration_s",
+        "entry_reason",
+        "exit_reason",
+        "min_bistatic_range_m",
+        "max_bistatic_range_m",
+        "min_bistatic_range_rate_mps",
+        "max_bistatic_range_rate_mps",
+        "min_bistatic_doppler_hz",
+        "max_bistatic_doppler_hz",
+        "maximum_abs_doppler_rate_hzps",
+        "min_snr_db",
+        "mean_snr_db",
+        "max_snr_db",
+        "peak_snr_utc_ms"
+      ],
+      "properties": {
+        "start_utc_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_utc_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "entry_reason": {
+          "enum": [
+            "prediction_start_inside_usable",
+            "prediction_horizon",
+            "geometric_visibility",
+            "rf_availability",
+            "bistatic_range_limit",
+            "doppler_limit",
+            "snr_threshold",
+            "state_transition"
+          ]
+        },
+        "exit_reason": {
+          "enum": [
+            "prediction_start_inside_usable",
+            "prediction_horizon",
+            "geometric_visibility",
+            "rf_availability",
+            "bistatic_range_limit",
+            "doppler_limit",
+            "snr_threshold",
+            "state_transition"
+          ]
+        },
+        "min_bistatic_range_m": {
+          "type": "number"
+        },
+        "max_bistatic_range_m": {
+          "type": "number"
+        },
+        "min_bistatic_range_rate_mps": {
+          "type": "number"
+        },
+        "max_bistatic_range_rate_mps": {
+          "type": "number"
+        },
+        "min_bistatic_doppler_hz": {
+          "type": "number"
+        },
+        "max_bistatic_doppler_hz": {
+          "type": "number"
+        },
+        "maximum_abs_doppler_rate_hzps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "min_snr_db": {
+          "type": "number"
+        },
+        "mean_snr_db": {
+          "type": "number"
+        },
+        "max_snr_db": {
+          "type": "number"
+        },
+        "peak_snr_utc_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "has_usable_window",
+        "next_window_start_utc_ms",
+        "next_window_end_utc_ms",
+        "total_usable_duration_s",
+        "maximum_snr_db",
+        "maximum_snr_utc_ms",
+        "minimum_bistatic_range_m",
+        "maximum_bistatic_range_m",
+        "minimum_bistatic_doppler_hz",
+        "maximum_bistatic_doppler_hz"
+      ],
+      "properties": {
+        "has_usable_window": {
+          "type": "boolean"
+        },
+        "next_window_start_utc_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "next_window_end_utc_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "total_usable_duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximum_snr_db": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "maximum_snr_utc_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "minimum_bistatic_range_m": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "maximum_bistatic_range_m": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "minimum_bistatic_doppler_hz": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "maximum_bistatic_doppler_hz": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://passive-radar.local/schemas/cue-config-2.0.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "publication_mode": {
+      "enum": [
+        "automatic",
+        "manual"
+      ]
+    },
+    "cue_prediction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "prediction_horizon_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "prediction_sample_interval_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "minimum_prediction_horizon_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "regeneration_debounce_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximum_prediction_age_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "minimum_track_history_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stable_track_history_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximum_adsb_report_age_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maneuver_heading_change_deg": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maneuver_speed_change_mps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maneuver_vertical_rate_change_mps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maneuver_position_error_m": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maneuver_altitude_error_m": {
+          "type": "number",
+          "minimum": 0
+        },
+        "position_error_absolute_m": {
+          "type": "number",
+          "minimum": 0
+        },
+        "position_error_relative_fraction": {
+          "type": "number",
+          "minimum": 0
+        },
+        "velocity_error_absolute_mps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "velocity_error_relative_fraction": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bistatic_range_error_absolute_m": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bistatic_range_error_relative_fraction": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bistatic_doppler_error_absolute_hz": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bistatic_doppler_error_relative_fraction": {
+          "type": "number",
+          "minimum": 0
+        },
+        "default_detection_threshold_db": {
+          "type": "number"
+        },
+        "maximum_bistatic_range_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "maximum_abs_bistatic_doppler_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "include_summary": {
+          "type": "boolean"
+        }
+      }
+    },
+    "udp_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "destination_address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destination_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "source_address": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maximum_datagram_bytes": {
+          "type": "integer",
+          "minimum": 512,
+          "maximum": 65507
+        },
+        "heartbeat_interval_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "snapshot_interval_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maximum_opportunities_per_cue": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "encoding": {
+          "enum": [
+            "json",
+            "deflate_dictionary"
+          ]
+        },
+        "dictionary_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        }
+      }
+    }
+  }
+}
