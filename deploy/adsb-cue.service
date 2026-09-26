@@ -16,7 +16,7 @@ After=network-online.target
 [Service]
 User=pi2
 WorkingDirectory=/home/pi2/flightTest/ADSB-remoter
-ExecStart=/home/pi2/flightTest/ADSB-remoter/.venv/bin/adsb-console --headless --source 127.0.0.1:30003 --cue-config deploy/pi-cue-config.json
+ExecStart=/home/pi2/flightTest/ADSB-remoter/.venv/bin/adsb-console --headless --source 127.0.0.1:30003 --observerfile deploy/pi-observers.ini --cue-config deploy/pi-cue-config.json
 # The app exits 1 when the SBS source is unreachable or closes; retry until dump1090 is back.
 Restart=on-failure
 RestartSec=10

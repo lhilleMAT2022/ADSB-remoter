@@ -111,3 +111,12 @@ def test_cue_configuration_defaults_and_validates_opportunity_limit(tmp_path: Pa
 def test_example_cue_configurations_validate() -> None:
     for path in ("examples/passive-radar-cueing.json", "deploy/pi-cue-config.json"):
         assert load_cue_runtime_config(path).udp_output.maximum_opportunities_per_cue == 3
+
+
+def test_pi_deployment_observers_are_the_receive_site_only() -> None:
+    observers = load_observers_or_default(Path("deploy/pi-observers.ini"))
+
+    assert [observer.name for observer in observers] == ["Apple Hill Receive Site"]
+    assert observers[0].role is ObserverRole.LOCAL
+    assert observers[0].receiver_gain_dbi == 10.0
+    assert (observers[0].noise_figure_db, observers[0].bandwidth_mhz) == (3.0, 8.0)
