@@ -117,5 +117,9 @@ The cue tasker runs on the ADS-B Raspberry Pi and publishes to the RF collection
 - **Watch or check the stream:** `uv run python tools/cue_capture.py --bind 0.0.0.0:31986 --multicast-group 239.192.10.1 --multicast-interface 192.168.10.41 --duration-s 60`.
   - It decodes both framings, validates against the schemas, and summarises gaps, snapshots, sizes and one-frame fit.
   - Add `--print` to stream the decoded messages as JSON lines (`| jq -c .`).
-- **socat only works on plain-JSON runs** (`--cue-encoding json`), because it can't split a compressed stream into messages: `socat -b 65535 -u UDP4-RECV:31986,reuseaddr,ip-add-membership=239.192.10.1:192.168.10.41,rcvbuf=8388608 STDOUT | jq -c --unbuffered .`
+- **socat, one message per line:** use `UDP4-RECVFROM` with `fork`, so each datagram gets its own child process and becomes one base64 line. `tools/cue_decode.py` then decodes either framing:
+  ```
+  socat -u UDP4-RECVFROM:31986,reuseaddr,ip-add-membership=239.192.10.1:192.168.10.41,fork SYSTEM:'base64 -w0; echo' | .venv/bin/python tools/cue_decode.py | jq -c .
+  ```
+  Don't put the decoder inside `SYSTEM:`, because socat parses commas and colons in the command. Plain `UDP4-RECV ... STDOUT` concatenates datagrams, which only works for plain-JSON runs.
 - **`degraded` heartbeats:** this status means the SBS feed has been silent for more than 20 s. That's common when few aircraft are in view, and ADS-B reception at the Pi has been thin.

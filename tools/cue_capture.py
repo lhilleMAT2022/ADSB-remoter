@@ -8,6 +8,7 @@ ones (0xDC, dictionary id, raw deflate). Messages are validated after decoding. 
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import socket
 import sys
@@ -220,6 +221,8 @@ def main() -> None:
                         "received_unix_s": received_utc,
                         "payload": payload,
                         "validation_errors": errors,
+                        # The exact wire bytes, so compressed captures stay reproducible.
+                        "datagram_b64": base64.b64encode(raw).decode("ascii"),
                     },
                     sort_keys=True,
                 )
