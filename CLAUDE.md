@@ -8,9 +8,15 @@ Python 3.13+ ADS-B tooling built around the SBS/BaseStation text protocol (dump1
 
 ### Purpose: cueing tracks of opportunity for the passive radar
 
-This tool listens to the dump1090 receiver and acts as a **bell ringer**: it flags aircraft entering the airspace that are good passive-radar opportunities and says which DTV illuminators suit them best. The passive bistatic radar collection system in `~/Documents/flightTest-pluto` (MATLAB, USRP N320 SURV/REF receiver at Apple Hill, git remote `pwilliamMAT/flightTest`) handles resource management: it decides when to start a passive track and keeps updating it, using the best illuminator available. Keep that split. This repo produces cues and ranks illuminators; it does not schedule collections or control the radio.
+This tool listens to the dump1090 receiver and acts as a **bell ringer**: it flags aircraft entering the airspace that are good passive-radar opportunities and says which DTV illuminators suit them best. The passive bistatic radar collection system is the flightTest repo (MATLAB, USRP N320 SURV/REF receiver at Apple Hill; git remote `pwilliamMAT/flightTest`; local worktrees under `~/Documents/flightTest*`). It handles resource management: it decides when to start a passive track and keeps updating it, using the best illuminator available. Keep that split. This repo produces cues and ranks illuminators; it does not schedule collections or control the radio.
 
-The cue interface is specified in `ADSBConsole_PassiveRadar_Cueing_Full_Engineering_Spec.md`, which covers the functional requirements FR-001–FR-014, the data model, the UDP transport, and the message schemas. That spec is the contract with the collection system, so read the relevant FR section before changing cue behavior.
+**The system documents live in flightTest `docs/system/` on `main`, the master copy** ([online](https://github.com/pwilliamMAT/flightTest/tree/main/docs/system)). In `System_Architecture.md` this program is item **CT**, the ADSB Cue Tasker.
+- **The contract:** the cue interface is governed by [`ICD_Messages.md`](https://github.com/pwilliamMAT/flightTest/blob/main/docs/system/ICD_Messages.md), §1 for conventions and transport and §2 for the CT messages. Read the relevant section before changing message content, schemas, rates or transport.
+- **The engineering spec:** `ADSBConsole_PassiveRadar_Cueing_Full_Engineering_Spec.md` in this repo is the original implementation spec (FR-001–FR-014, the prediction design). Where it and the ICD differ, the ICD wins.
+- **Change process:** changes to messages or to the config schema start as a change request in flightTest `docs/system/Change_Requests.md`, with evidence, before or alongside the code. The current deviation is the top-N opportunity cap (CR-1).
+- **Record keeping:**
+  - Record deployment changes in `docs/system/As_Built.md`.
+  - Record verification captures from `tools/cue_capture.py` or socat in `docs/system/Verification_Log.md`, with the raw file under `docs/system/evidence/`.
 - **Messages:** versioned UDP JSON messages validated by `schemas/*-1.1.0.json`: `track_cue`, `track_cue_withdrawal`, heartbeat, and snapshot begin/end. Older versions live in `schemas/archive/`.
 - **Changing the wire format:** add a new schema version and bump `SCHEMA_VERSION` in `cue.py`; don't edit a released schema in place. Every schema property is emitted on every message, with `null` for unknown values, so MATLAB `jsondecode` produces stable structs. Keep it that way.
 - **Enabling it:** cueing is off unless `--cue-config <json>` is given. `cue_config.py` validates that file against `schemas/cue-config-1.1.0.json` (1.0.0 is archived), and `examples/passive-radar-cueing.json` is a template. Each cue carries only the top `maximum_opportunities_per_cue` opportunities by peak window SNR, 3 by default (`CueSerializer.ranked_opportunities`). Uncapped cues exceed the 16 KiB datagram limit and are dropped, and a dropped cue shows up only as a gap in `sequence_number`. That example sends to multicast `239.192.10.1:31986` with TTL 1, so the collection system must be on the same subnet.
@@ -18,8 +24,8 @@ The cue interface is specified in `ADSBConsole_PassiveRadar_Cueing_Full_Engineer
 
 The two systems must agree on these:
 - **Bistatic convention:** `R_excess = R_tx + R_rx − L_baseline` and `f_D = −(fc/c)·dR_excess/dt`, both matching `bistatic_measurement` here. flightTest-pluto enforces the same convention with `bistaticTruthConventionTest.m`, so don't let them drift apart.
-- **DTV emitter table:** `20_DTV_direct_path_input.csv` is also kept at `flightTest-pluto/TestSetupTesting/siteData/`.
-- **Receive site:** the geometry and antenna pointing are documented in `flightTest-pluto/TestSetupTesting/SiteGeometry.md`.
+- **DTV emitter table:** the master is flightTest `docs/system/20_DTV_direct_path_input.csv`. The copy at this repo's root must match it (same rows; only line endings differ today).
+- **Receive site:** the master for geometry and antenna pointing is flightTest `docs/system/SiteGeometry.md`. `deploy/pi-observers.ini` takes the receive-site position from it. See CR-7 for the altitude inconsistency.
 - **Pi ADS-B feed:** the Pi at `192.168.10.131` also runs the collection system's truth logger (`ADSB_GPS/gatherTCPcompress.py`).
 
 The README has PowerShell examples (the original Windows workstation), but the current development host is the Ubuntu 26.04 RF collection desktop. The live feed is a Raspberry Pi at `192.168.10.131:30003`. See **Lab deployment** below.
@@ -71,7 +77,7 @@ Tests use small in-code fixtures plus `tests/fixtures/` (a basestation sample, t
 
 ## Lab deployment
 
-The cue tasker runs on the ADS-B Raspberry Pi and publishes to the RF collection desktop. Everything below was set up and checked through a Pi reboot on 2026-09-25.
+The cue tasker runs on the ADS-B Raspberry Pi and publishes to the RF collection desktop. Everything below was set up and checked through a Pi reboot on 2026-09-25. The system-level record is flightTest `docs/system/As_Built.md`; keep the two in step.
 
 **Hosts** (both on the data collection network, 192.168.10.0/24; the N320 is 192.168.10.2):
 - **RF collection desktop** `rf-lenovo-mw` (Ubuntu 26.04): `eno1` 192.168.10.41 is the data network, the internet comes over Wi-Fi `wlp2s0`, and ZeroTier is 172.25.20.164. It consumes the cues. sudo needs a password, so the user runs desktop sudo commands.

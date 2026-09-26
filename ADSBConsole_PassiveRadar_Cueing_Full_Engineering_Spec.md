@@ -1,5 +1,7 @@
 # Engineering Specification: ADS-B Cued Passive-Radar Observation Opportunities
 
+> **Interface contract superseded (2026-09-26):** the messages, schemas, transport and rates are now governed by the ICD, [flightTest `docs/system/ICD_Messages.md`](https://github.com/pwilliamMAT/flightTest/blob/main/docs/system/ICD_Messages.md) (master copy on `main`). This spec remains the implementation reference for the prediction design (FR-001–FR-014). Where the two differ, the ICD governs.
+
 **Application:** `ADSBConsoleApp`  
 **Downstream activity:** `passiveTrackerPlanner`  
 **Interface:** UDP/IP carrying UTF-8 JSON  

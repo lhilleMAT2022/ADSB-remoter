@@ -83,6 +83,8 @@ adsb-console --source 127.0.0.1:28887
 
 ### Passive-radar cue publication
 
+The message contract for the cue stream is the ICD in the flightTest repo, [`docs/system/ICD_Messages.md`](https://github.com/pwilliamMAT/flightTest/blob/main/docs/system/ICD_Messages.md), which is the master copy on `main`. The system architecture and the change requests are alongside it in [`docs/system/`](https://github.com/pwilliamMAT/flightTest/tree/main/docs/system).
+
 Cue prediction and UDP publication are disabled unless a cue configuration is supplied:
 
 ```powershell
