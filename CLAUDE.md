@@ -22,7 +22,7 @@ The two systems must agree on these:
 - **Receive site:** the geometry and antenna pointing are documented in `flightTest-pluto/TestSetupTesting/SiteGeometry.md`.
 - **Pi ADS-B feed:** the Pi at `192.168.10.131` also runs the collection system's truth logger (`ADSB_GPS/gatherTCPcompress.py`).
 
-The README has PowerShell examples (the original Windows workstation), but the current dev/deployment host is Ubuntu 24. The live feed is a Raspberry Pi at `192.168.10.131:30003`.
+The README has PowerShell examples (the original Windows workstation), but the current development host is the Ubuntu 26.04 RF collection desktop. The live feed is a Raspberry Pi at `192.168.10.131:30003`. See **Lab deployment** below.
 
 ## Commands
 
@@ -45,7 +45,7 @@ uv run adsb-playback tests/fixtures/sbs_clean/10_adsb_20220413_060850.csv.gz --b
 uv run adsb-console --source 127.0.0.1:28887 [--observerfile tests/fixtures/observers.ini]
 ```
 
-`--headless` runs the same app with no terminal UI, for use as a service. Status-log lines and a summary once a minute go to stderr through `logging`. SIGTERM or SIGINT does a clean exit that sends a `stopping` heartbeat, and losing the SBS source makes it exit 1 so a supervisor restarts it. `deploy/adsb-cue.service` and `deploy/pi-cue-config.json` run it as the cue tasker on the ADS-B Raspberry Pi (`pi2@192.168.10.131`, repo at `~/flightTest/ADSB-remoter`, local dump1090 on `127.0.0.1:30003`); the install and remote-control commands are in the unit file's header.
+`--headless` runs the same app with no terminal UI, for use as a service. Status-log lines and a summary once a minute go to stderr through `logging`. SIGTERM or SIGINT does a clean exit that sends a `stopping` heartbeat, and losing the SBS source makes it exit 1 so a supervisor restarts it. This is how the cue tasker runs on the ADS-B Pi (see **Lab deployment**).
 
 Playback rewrites message timestamps to the current time by default (`--no-rebase-timestamps` turns this off). Age-out and purge compare each track's `last_seen` against wall-clock `utc_now()`, so replaying the 2022 fixtures without rebasing makes every track show as aged or get purged.
 
@@ -68,3 +68,30 @@ All code is in `src/adsb_console/`. Dependencies point one way, and only `app.py
   Cueing in the app works like this. Each tracker update may schedule a prediction, and a 1 s timer also schedules periodic ones. `build_track_prediction` and every publisher call run in `asyncio.to_thread`, so the UI isn't blocked. In `automatic` mode each committed prediction is published. In `manual` mode (toggle with `m`), only the selected track is sent, and only when the user presses `Q` (uppercase; lowercase `q` quits). Timers send the heartbeat and periodic full snapshots, and a withdrawal (`reason: track_purged`) is published for any previously published track that gets purged. Withdrawals happen only at purge time (`--track-retention-minutes`, default 20 min), not when a track ages out after 20 s, so the collection system has to rely on each cue's `valid_until_utc` for tracks that go stale.
 
 Tests use small in-code fixtures plus `tests/fixtures/` (a basestation sample, the observers INI, and gzipped real SBS captures).
+
+## Lab deployment
+
+The cue tasker runs on the ADS-B Raspberry Pi and publishes to the RF collection desktop. Everything below was set up and checked through a Pi reboot on 2026-09-25.
+
+**Hosts** (both on the data collection network, 192.168.10.0/24; the N320 is 192.168.10.2):
+- **RF collection desktop** `rf-lenovo-mw` (Ubuntu 26.04): `eno1` 192.168.10.41 is the data network, the internet comes over Wi-Fi `wlp2s0`, and ZeroTier is 172.25.20.164. It consumes the cues. sudo needs a password, so the user runs desktop sudo commands.
+- **ADS-B Pi** `pi2@192.168.10.131` (Pi 4, Debian 11): dump1090 serves SBS on `:30003`, and ZeroTier is 172.25.127.167 (network `12ac4a1e71f93ac3`). `pi2` has passwordless sudo. SSH from the desktop uses `~/.ssh/id_ed25519_flighttest`, set in `~/.ssh/config`.
+
+**Network:** the Pi reaches the internet only through the desktop.
+- **Desktop side:** `/etc/sysctl.d/90-pi-gateway.conf` turns on forwarding, and `pi-gateway-nat.service`, a oneshot unit, adds `MASQUERADE -s 192.168.10.131 -o wlp2s0` if it's missing. If the desktop's internet moves off Wi-Fi, edit `-o wlp2s0` in that unit. ufw is installed but disabled.
+- **Pi side:** `/etc/dhcpcd.conf` sets `static routers=192.168.10.41` and DNS `8.8.8.8 144.212.95.8`. The original is saved as `/etc/dhcpcd.conf.bak-20260926`. The old gateway, 192.168.10.1, does not exist.
+- **Why the Pi needs internet:** chrony keeps time only from internet NTP, because the GPS/PPS refclocks aren't locked. Without NTP the Pi drifted about 15 s behind, which shifts every cue timestamp and all ADS-B truth. ZeroTier and `uv` also need internet.
+
+**Service:**
+- **Install:** the repo is at `~/flightTest/ADSB-remoter` on branch `feature/passive-radar-cueing`, and uv is `~/.local/bin/uv`.
+- **Update:** `git pull --ff-only && ~/.local/bin/uv sync --no-dev && sudo systemctl restart adsb-cue`. If `deploy/adsb-cue.service` changed, first copy it to `/etc/systemd/system/` and run `sudo systemctl daemon-reload`.
+- **What the unit runs:** `.venv/bin/adsb-console --headless` with `deploy/pi-observers.ini` and `deploy/pi-cue-config.json` (multicast `239.192.10.1:31986`, `source_address` pinned to 192.168.10.131).
+  - The observer file holds only the surveyed receive site. Its RF values are explicit because the INI loader defaults `receiverGainDbi` to 0.
+- **Boot order:** the unit uses `Restart=on-failure`. At boot it starts before dump1090 listens, exits 1, and connects on the restart 10 s later. That's expected.
+- **Logs:** use `sudo journalctl -u adsb-cue`, because `pi2` can't read the journal without sudo. The Pi's journald keeps only notice and above, so the unit sets `SyslogLevel=notice`.
+- **CPU:** a prediction took about 407 ms on the Pi with 2 observers × 16 UHF emitters, about 5× slower than the desktop. Predictions are pure Python and limited to about one core, so keep observers and emitters lean.
+
+**Monitoring on the desktop:** join the multicast group on `192.168.10.41`, because the desktop's default route is Wi-Fi. netcat can't join multicast groups.
+- **socat:** `socat -b 65535 -u UDP4-RECV:31986,reuseaddr,ip-add-membership=239.192.10.1:192.168.10.41,rcvbuf=8388608 STDOUT | jq -c --unbuffered .` Keep `-b 65535`: socat's default 8 KiB block truncates cues of about 8 KB.
+- **Schema checks and summaries:** `tools/cue_capture.py` with `--multicast-group 239.192.10.1 --multicast-interface 192.168.10.41`.
+- **`degraded` heartbeats:** this status means the SBS feed has been silent for more than 20 s. That's common when few aircraft are in view, and ADS-B reception at the Pi has been thin.
